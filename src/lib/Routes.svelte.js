@@ -51,9 +51,6 @@ export const adminRoutes = {
 }
 
 export const guestRoutes = {
-  // '/': wrap({
-  //   asyncComponent: () => import('../routes/LandingPage/LandingPage.svelte'),
-  // }),
   '/': wrap({
     asyncComponent: () => import('../routes/auth/Login.svelte'),
   }),
