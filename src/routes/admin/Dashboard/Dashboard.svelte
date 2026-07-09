@@ -120,7 +120,7 @@
       </div>
 
       <h1 class="mb-4 font-['Playfair_Display'] text-4xl font-normal leading-tight md:text-5xl lg:text-6xl">
-        Good day,<br />
+        Good days,<br />
         <span class="font-semibold italic text-sky-600 dark:text-sky-400">{username}</span><br />
         Let's make the most of it.
       </h1>

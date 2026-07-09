@@ -4,115 +4,6 @@ export const adminRoutes = {
   '/': wrap({
     asyncComponent: () => import('../routes/admin/Dashboard/Dashboard.svelte'),
   }),
-  '/registration': wrap({
-    asyncComponent: () => import('../routes/admin/Forms/Registration/Registration.svelte'),
-  }),
-  // '/management/group': wrap({
-  //   asyncComponent: () => import('../routes/admin/Management/Group.svelte'),
-  // }),
-  // '/management/room': wrap({
-  //   asyncComponent: () => import('../routes/admin/Management/Room.svelte'),
-  // }),
-  // '/management/newroom': wrap({
-  //   asyncComponent: () => import('../routes/admin/Management/Newroom.svelte'),
-  // }),
-  // '/management/student': wrap({
-  //   asyncComponent: () => import('../routes/admin/Management/Student.svelte'),
-  // }),
-  // '/management/subject': wrap({
-  //   asyncComponent: () => import('../routes/admin/Management/Subject.svelte'),
-  // }),
-  // '/management/teacher': wrap({
-  //   asyncComponent: () => import('../routes/admin/Management/Teacher.svelte'),
-  // }),
-  // '/management/bookings': wrap({
-  //   asyncComponent: () => import('../routes/admin/Management/Bookings.svelte'),
-  // }),
-  // '/advance/advanceschedule': wrap({
-  //   asyncComponent: () => import('../routes/admin/Advance/advanceSchedule.svelte'),
-  // }),
-  // '/advance/advancegroupschedule': wrap({
-  //   asyncComponent: () => import('../routes/admin/Advance/advanceGroupSchedule.svelte'),
-  // }),
-  // '/advance/grouptemplate': wrap({
-  //   asyncComponent: () => import('../routes/admin/Advance/GroupTemplate.svelte'),
-  // }),
-  // '/advance/studenttemplate': wrap({
-  //   asyncComponent: () => import('../routes/admin/Advance/StudentTemplate.svelte'),
-  // }),
-  // '/advance/teachertemplate': wrap({
-  //   asyncComponent: () => import('../routes/admin/Advance/TeacherTemplate.svelte'),
-  // }),
-
-  // '/current/scheduleinput': wrap({
-  //   asyncComponent: () => import('../routes/admin/Current/scheduleInput.svelte'),
-  // }),
-  // '/current/grouptable': wrap({
-  //   asyncComponent: () => import('../routes/admin/Current/GroupTable.svelte'),
-  // }),
-  // '/current/groupview': wrap({
-  //   asyncComponent: () => import('../routes/admin/Current/GroupView.svelte'),
-  // }),
-  // '/current/studentview': wrap({
-  //   asyncComponent: () => import('../routes/admin/Current/StudentView.svelte'),
-  // }),
-  // '/current/teacherview': wrap({
-  //   asyncComponent: () => import('../routes/admin/Current/TeacherView.svelte'),
-  // }),
-  // '/new/studentview': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/StudentView.svelte'),
-  // }),
-  // '/new/teacherview': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/TeacherView.svelte'),
-  // }),
-  // '/new/lessonschedulehistory': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/LessonScheduleHistory.svelte'),
-  // }),
-  // '/new/schedule': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/Schedule.svelte'),
-  // }),
-  // '/new/room': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/Room.svelte'),
-  // }),
-  // '/new/teacherinfo': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/TeacherInfo.svelte'),
-  // }),
-  // '/new/studentinfo': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/StudentInfo.svelte'),
-  // }),
-  // '/new/advanceschedule': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/AdvanceSchedule.svelte'),
-  // }),
-  // '/new/advanceteacherview': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/AdvanceTeacherView.svelte'),
-  // }),
-  // '/new/advancestudentview': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/AdvanceStudentView.svelte'),
-  // }),
-  // '/new/dailyschedule': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/DailySchedule.svelte'),
-  // }),
-  // '/new/dailystudentview': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/DailyStudentView.svelte'),
-  // }),
-  // '/new/dailyteacherview': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/DailyTeacherView.svelte'),
-  // }),
-  // '/new/graduatingstudent': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/GraduatingStudent.svelte'),
-  // }),
-  // '/new/dailygroupschedule': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/DailyGroupSchedule.svelte'),
-  // }),
-  // '/new/holidaypicker': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/HolidayPicker.svelte'),
-  // }),
-  // '/new/releaselog': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/ReleaseLog.svelte'),
-  // }),
-  // '/new/activitylog': wrap({
-  //   asyncComponent: () => import('../routes/admin/New/ActivityLog.svelte'),
-  // }),
   '/daily/input/mtmschedule': wrap({
     asyncComponent: () => import('../routes/admin/Daily/Input/MtmSchedule.svelte'),
   }),
@@ -125,12 +16,14 @@ export const adminRoutes = {
   '/daily/input/graduatingstudent': wrap({
     asyncComponent: () => import('../routes/admin/Daily/Input/GraduatingStudent.svelte'),
   }),
+
   '/daily/views/teacherview': wrap({
     asyncComponent: () => import('../routes/admin/Daily/views/TeacherView.svelte'),
   }),
   '/daily/views/studentview': wrap({
     asyncComponent: () => import('../routes/admin/Daily/views/StudentView.svelte'),
   }),
+
   '/daily/information/student/studentinfo': wrap({
     asyncComponent: () => import('../routes/admin/Daily/Information/Student/studentInfo.svelte'),
   }),
@@ -167,78 +60,6 @@ export const guestRoutes = {
   '/login': wrap({
     asyncComponent: () => import('../routes/auth/Login.svelte'),
   }),
-  '/dashboard': wrap({
-    asyncComponent: () => import('../routes/LandingPage/LandingPage.svelte'),
-  }),
-  '/registration': wrap({
-    asyncComponent: () => import('../routes/forms/Registration/Registration.svelte'),
-  }),
-  '/registration/group': wrap({
-    asyncComponent: () => import('../routes/forms/Registration/Group/GroupRegistration.svelte'),
-  }),
-  '/registration/single': wrap({
-    asyncComponent: () => import('../routes/forms/Registration/Single/SingleRegistration.svelte'),
-  }),
-  '/rules': wrap({
-    asyncComponent: () => import('../routes/forms/Rules/Rules.svelte'),
-  }),
-  '/rules/welcome': wrap({
-    asyncComponent: () => import('../routes/forms/Rules/Welcome/Welcome.svelte'),
-  }),
-  '/rules/regulation': wrap({
-    asyncComponent: () => import('../routes/forms/Rules/Regulation/Regulation.svelte'),
-  }),
-  '/schedule/advanceschedule': wrap({
-    asyncComponent: () => import('../routes/Schedule/advanceSchedule.svelte'),
-  }),
-  '/schedule/scheduleinput': wrap({
-    asyncComponent: () => import('../routes/Schedule/scheduleInput.svelte'),
-  }),
-  '/schedule/advancegroupschedule': wrap({
-    asyncComponent: () => import('../routes/Schedule/advanceGroupSchedule.svelte'),
-  }),
-  '/schedule/grouptable': wrap({
-    asyncComponent: () => import('../routes/Schedule/GroupTable.svelte'),
-  }),
-  '/schedule/schedulestudent': wrap({
-    asyncComponent: () => import('../routes/Schedule/scheduleStudent.svelte'),
-  }),
-  '/input/teacher': wrap({
-    asyncComponent: () => import('../routes/Input/Teacher.svelte'),
-  }),
-  '/input/subject': wrap({
-    asyncComponent: () => import('../routes/Input/Subject.svelte'),
-  }),
-  '/input/room': wrap({
-    asyncComponent: () => import('../routes/Input/Room.svelte'),
-  }),
-  '/input/group': wrap({
-    asyncComponent: () => import('../routes/Input/Group.svelte'),
-  }),
-  '/input/student': wrap({
-    asyncComponent: () => import('../routes/Input/Student.svelte'),
-  }),
-  '/input/teacherview': wrap({
-    asyncComponent: () => import('../routes/Input/TeacherView.svelte'),
-  }),
-  '/input/studentview': wrap({
-    asyncComponent: () => import('../routes/Input/StudentView.svelte'),
-  }),
-  '/input/studenttemplate': wrap({
-    asyncComponent: () => import('../routes/Input/StudentTemplate.svelte'),
-  }),
-  '/input/teachertemplate': wrap({
-    asyncComponent: () => import('../routes/Input/TeacherTemplate.svelte'),
-  }),
-  '/input/grouptemplate': wrap({
-    asyncComponent: () => import('../routes/Input/GroupTemplate.svelte'),
-  }),
-  '/input/groupview': wrap({
-    asyncComponent: () => import('../routes/Input/GroupView.svelte'),
-  }),
-  '/inventory/userinventory': wrap({
-    asyncComponent: () => import('../routes/Inventory/UserInventory.svelte'),
-  }),
   '*': wrap({
     asyncComponent: () => import('../routes/PageNotFound/PageNotFound.svelte'),
   }),
@@ -250,9 +71,6 @@ export const staffRoutes = {
   }),
   '/daily/input/subclass': wrap({
     asyncComponent: () => import('../routes/admin/Daily/Input/subClass.svelte'),
-  }),
-  '/inventory/inventory': wrap({
-    asyncComponent: () => import('../routes/Inventory/inventory.svelte'),
   }),
   '/daily/views/checker': wrap({
     asyncComponent: () => import('../routes/admin/Daily/views/Checker.svelte'),
@@ -266,9 +84,6 @@ export const teacherRoutes = {
   '/': wrap({
     asyncComponent: () => import('../routes/admin/Dashboard/TeacherDash.svelte'),
   }),
-  '/new/teachertable': wrap({
-    asyncComponent: () => import('../routes/admin/New/TeacherTable.svelte'),
-  }),
   '/daily/views/teachertable': wrap({
     asyncComponent: () => import('../routes/admin/Daily/views/TeacherTable.svelte'),
   }),
@@ -280,9 +95,6 @@ export const teacherRoutes = {
 export const studentRoutes = {
   '/': wrap({
     asyncComponent: () => import('../routes/admin/Dashboard/StudentDash.svelte'),
-  }),
-  '/new/studenttable': wrap({
-    asyncComponent: () => import('../routes/admin/New/StudentTable.svelte'),
   }),
   '/daily/views/studenttable': wrap({
     asyncComponent: () => import('../routes/admin/Daily/views/StudentTable.svelte'),
