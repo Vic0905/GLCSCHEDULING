@@ -67,6 +67,7 @@
                sm:max-w-[calc(100vw-2rem)] sm:overflow-x-auto"
       >
         <li><a href="/#/daily/information/log/activitylog">Activity Log</a></li>
+        <li><a href="/#/daily/information/holiday/holidaypicker">Holiday Picker</a></li>
         <li><a href="/#/daily/information/student/studentinfo">Student Info</a></li>
         <li><a href="/#/daily/information/teacher/teacherinfo">Teacher Info</a></li>
         <li><a href="/#/daily/information/room/room">Room Info</a></li>

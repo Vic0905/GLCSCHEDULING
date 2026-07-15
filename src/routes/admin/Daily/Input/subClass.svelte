@@ -5,6 +5,7 @@
   import { toast } from 'svelte-sonner'
   import SubModal from './subModal.svelte'
   import { pb } from '../../../../lib/Pocketbase.svelte'
+  import MakeupModal from './makeupModal.svelte'
 
   // ─────────────────────────────────────────────
   // SECTION 1: Non-reactive module-level state
@@ -16,11 +17,13 @@
   let cachedRooms = []
   let cachedHolidays = []
   let teacherRoomMap = new Map()
+  let teacherRoomObjMap = new Map()
 
   // ─────────────────────────────────────────────
   // SECTION 2: Reactive state
   // ─────────────────────────────────────────────
   let subModal = $state()
+  let makeupModal = $state()
   let selectedDate = $state(getTodayDate())
   let todayHoliday = $state(null)
   let isLoading = $state(false)
@@ -90,17 +93,26 @@
   function formatTeacherCell(cell, row) {
     const bgClass = row.cells[0].data.bgClass
     const hasNewBadge = cell.status === 'new'
+    const subGivenCount = cell.subGivenCount || 0
 
-    return h('div', { class: `w-full h-full p-2 flex flex-col items-center justify-center text-center ${bgClass}` }, [
-      h(
-        'div',
-        { class: 'flex items-center gap-1' },
-        [
-          h('span', { class: 'font-bold text-neutral-700' }, cell.value),
-          hasNewBadge && h('span', { class: 'badge badge-success badge-xs ml-1' }, 'New'),
-        ].filter(Boolean)
-      ),
-    ])
+    return h(
+      'div',
+      { class: `w-full h-full p-2 flex flex-col items-center justify-center text-center ${bgClass}` },
+      [
+        h(
+          'div',
+          { class: 'flex items-center gap-1' },
+          [
+            h('span', { class: 'font-bold text-neutral-700' }, cell.value),
+            hasNewBadge && h('span', { class: 'badge badge-success badge-xs ml-1' }, 'New'),
+          ].filter(Boolean)
+        ),
+        subGivenCount > 0 &&
+          h('div', { class: 'flex gap-1 mt-1' }, [
+            h('span', { class: 'text-sm font-bold text-info' }, `Subs: ${subGivenCount}`),
+          ]),
+      ].filter(Boolean)
+    )
   }
 
   function formatRoomCell(cell, row) {
@@ -118,8 +130,13 @@
     if (!cell?.schedules?.length) {
       return h(
         'div',
-        { class: `w-full h-full min-h-[55px] flex items-center justify-center text-gray-400 ${bgClass}` },
-        '—'
+        {
+          class: `group w-full h-full min-h-[55px] flex items-center justify-center text-gray-400 sub-cell-empty cursor-pointer transition-colors hover:bg-info/10 ${bgClass}`,
+          title: 'Click to create a make-up class',
+          onClick: () => handleEmptyCellClick(cell),
+        },
+        h('span', { class: 'group-hover:hidden' }, '—'),
+        h('span', { class: 'hidden group-hover:inline text-info font-bold text-lg' }, '+')
       )
     }
 
@@ -147,7 +164,7 @@
     const roomName = first.roomName || 'No Room'
     const allStudents = schedules.flatMap((s) => s.students.map((std) => std.name))
     const hasSub = !!first.sub
-
+    const isGrp = /^[GH]/i.test(roomName)
     return h(
       'div',
       {
@@ -161,13 +178,19 @@
         h(
           'div',
           { class: 'flex flex-wrap justify-center gap-1' },
-          allStudents.map((name) => h('span', { class: 'text-xs font-semibold whitespace-nowrap' }, name))
+          allStudents.map((name, i) =>
+            h(
+              'span',
+              { class: 'text-xs font-semibold whitespace-nowrap' },
+              isGrp && i < allStudents.length - 1 ? `${name},` : name
+            )
+          )
         ),
         hasSub
           ? h('div', { class: 'flex items-center justify-center gap-1 mt-1' }, [
               h('span', { class: 'text text-sm font-semibold' }, `Sub: ${first.sub.name}`),
             ])
-          : h('span', { class: 'text text-xs text-info opacity-70 mt-1' }, 'click to assign sub'),
+          : h('span', { class: 'text text-xs opacity-40 mt-1' }, 'No sub assigned'),
       ]
     )
   }
@@ -214,7 +237,7 @@
   // SECTION 6: Grid config builder
   // ─────────────────────────────────────────────
 
-  function buildGridConfig(teachers, timeslots, scheduleMap) {
+  function buildGridConfig(teachers, timeslots, scheduleMap, subCountMap) {
     const columns = [
       {
         name: 'Teacher',
@@ -238,13 +261,18 @@
       const bgClass = i % 2 === 0 ? 'bg-white text-neutral-800' : 'bg-neutral-100 text-neutral-800'
 
       const row = [
-        { value: teacher.name, status: teacher.status, bgClass },
+        {
+          value: teacher.name,
+          status: teacher.status,
+          bgClass,
+          subGivenCount: subCountMap.get(teacher.id) || 0,
+        },
         { value: teacherRoomMap.get(teacher.id) || '—', bgClass },
       ]
 
       for (const ts of timeslots) {
         const schedules = scheduleMap.get(`${teacher.id}-${ts.id}`) || []
-        row.push({ schedules, teacher, timeslot: ts, bgClass })
+        row.push({ schedules, teacher, timeslot: ts, room: teacherRoomObjMap.get(teacher.id) || null, bgClass })
       }
 
       return row
@@ -256,6 +284,10 @@
   // ─────────────────────────────────────────────
   // SECTION 7: Grid renderer
   // ─────────────────────────────────────────────
+  // NOTE: cells with a schedule stay display-only — assigning a sub still
+  // happens exclusively through the "Assign Sub" button in the header.
+  // Empty cells ARE clickable: formatSubCell attaches an onClick that
+  // opens MakeupModal (see handleEmptyCellClick, SECTION 10).
 
   async function renderGrid(columns, data, scroll) {
     await tick()
@@ -289,22 +321,6 @@
         },
         style: { table: { 'table-layout': 'fixed' } },
       }).render(document.getElementById('sub-grid'))
-
-      gridInstance.on('cellClick', (_e, cell) => {
-        const d = cell.data
-        // Ignore disabled/teacher/room columns and empty cells
-        if (!d?.schedules?.length) return
-
-        const room = d.schedules[0].room
-        if (!room) return
-
-        subModal.open({
-          room,
-          timeslot: d.timeslot,
-          date: selectedDate,
-          schedules: d.schedules,
-        })
-      })
     }
   }
 
@@ -338,7 +354,9 @@
     if (!cachedTeachers.length) cachedTeachers = teachers
     if (!cachedRooms.length) {
       cachedRooms = rooms
-      teacherRoomMap = new Map(rooms.filter((rt) => rt.expand?.teacher).map((rt) => [rt.expand.teacher.id, rt.name]))
+      const roomsWithTeacher = rooms.filter((rt) => rt.expand?.teacher)
+      teacherRoomMap = new Map(roomsWithTeacher.map((rt) => [rt.expand.teacher.id, rt.name]))
+      teacherRoomObjMap = new Map(roomsWithTeacher.map((rt) => [rt.expand.teacher.id, rt]))
     }
 
     return { timeslots, teachers, rooms, schedules }
@@ -366,9 +384,13 @@
       // and track which teachers actually have a schedule today —
       // even if they have no default MTM room assigned.
       const subSet = new Set()
+      const subCountMap = new Map() // subTeacherId -> count of sub assignments today
       const bookedTeacherIds = new Set()
       for (const s of normalized) {
-        if (s.sub) subSet.add(`${s.teacherId}-${s.timeslotId}`)
+        if (s.sub) {
+          subSet.add(`${s.teacherId}-${s.timeslotId}`)
+          subCountMap.set(s.sub.id, (subCountMap.get(s.sub.id) || 0) + 1)
+        }
         if (s.teacherId) bookedTeacherIds.add(s.teacherId)
       }
       subCount = subSet.size
@@ -380,7 +402,7 @@
       // room/status). Room-assigned teachers sort first by room; the rest
       // sort alphabetically after.
       const teachers = cachedTeachers
-        .filter((t) => teacherRoomMap.has(t.id) || bookedTeacherIds.has(t.id))
+        .filter((t) => t.status !== 'disabled' || bookedTeacherIds.has(t.id))
         .sort((a, b) => {
           const aRoom = teacherRoomMap.get(a.id)
           const bRoom = teacherRoomMap.get(b.id)
@@ -395,7 +417,7 @@
           return aKey.num - bKey.num
         })
 
-      const { columns, data } = buildGridConfig(teachers, timeslots, scheduleMap)
+      const { columns, data } = buildGridConfig(teachers, timeslots, scheduleMap, subCountMap)
       await renderGrid(columns, data, scroll)
     } catch (err) {
       console.error(err)
@@ -431,6 +453,28 @@
     await loadSchedules(saveScroll())
   }
 
+  function openSubModal() {
+    subModal.open({
+      date: selectedDate,
+      teachers: cachedTeachers,
+      timeslots: cachedTimeslots,
+    })
+  }
+
+  // Empty cell = no schedule for that teacher/timeslot today — open
+  // MakeupModal pre-filled with teacher/timeslot/date/room so a new
+  // make-up class can be created directly from the grid.
+  function handleEmptyCellClick(cell) {
+    if (!cell?.teacher || !cell?.timeslot) return
+    makeupModal.open({
+      teacher: cell.teacher,
+      room: cell.room || null, // null if teacher has no assigned MTM room — MakeupModal shows its own room picker in that case
+      timeslot: cell.timeslot,
+      date: selectedDate,
+      schedules: [], // empty → MakeupModal opens in create mode, not edit mode
+    })
+  }
+
   // ─────────────────────────────────────────────
   // SECTION 11: Lifecycle
   // ─────────────────────────────────────────────
@@ -459,6 +503,12 @@
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-2">
     <div class="order-2 sm:order-1 flex-1 flex items-center justify-center sm:justify-start">
+      <button class="btn btn-info btn-sm" onclick={openSubModal}>+ Assign Sub</button>
+    </div>
+
+    <h2 class="order-1 sm:order-2 text-center flex-1 text-xl sm:text-2xl font-bold">Daily Make-up/SubClass Schedule</h2>
+
+    <div class="order-3 flex-1 flex items-center gap-3 justify-center sm:justify-end">
       {#if subCount > 0}
         <span class="badge badge-info badge-lg gap-2 font-bold text-sm">
           {subCount} sub{subCount === 1 ? '' : 's'} assigned
@@ -466,11 +516,6 @@
       {:else}
         <span class="text-sm font-normal opacity-40">No subs assigned</span>
       {/if}
-    </div>
-
-    <h2 class="order-1 sm:order-2 text-center flex-1 text-xl sm:text-2xl font-bold">Daily SubClass Schedule</h2>
-
-    <div class="order-3 flex-1 flex justify-center sm:justify-end">
       <div class="w-6 h-6 flex items-center justify-center">
         {#if isLoading}
           <div class="loading loading-spinner loading-sm"></div>
@@ -522,13 +567,14 @@
     </div>
   </div>
 
-  <!-- Grid container — gridjs renders into this div -->
+  <!-- Grid container — gridjs renders into this div (display-only, no click interactivity) -->
   <div class="overflow-x-auto rounded-lg">
     <div id="sub-grid"></div>
   </div>
 </div>
 
 <SubModal bind:this={subModal} onrefresh={refreshWithScroll} />
+<MakeupModal bind:this={makeupModal} onrefresh={refreshWithScroll} />
 
 <!-- ─────────────────────────────────────────── -->
 <!-- STYLES                                      -->
@@ -537,13 +583,6 @@
 <style>
   :global(html) {
     scrollbar-gutter: stable;
-  }
-
-  /* Hover only on cells that have a schedule */
-  #sub-grid :global(.gridjs-table td:hover > .sub-cell-with-schedule) {
-    background-color: #e0e4e9 !important;
-    transition: background-color 0.15s ease;
-    cursor: pointer;
   }
 
   /* Scrollable grid wrapper */
@@ -604,11 +643,5 @@
   #sub-grid :global(.gridjs-table td),
   #sub-grid :global(.gridjs-table th) {
     outline: 1px solid #535252;
-  }
-
-  @media (max-width: 640px) {
-    div#sub-grid {
-      zoom: 0.65 !important;
-    }
   }
 </style>
