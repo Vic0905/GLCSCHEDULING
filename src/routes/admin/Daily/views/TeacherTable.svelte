@@ -376,14 +376,14 @@
           <div class="overflow-x-auto">
             <table class="table table-xs sm:table-sm w-full min-w-[780px] border-collapse">
               <colgroup>
-                <col class="w-30" />
+                <col class="w-10" />
+                <col class="w-50" />
+                <col class="w-50" />
                 <col class="w-100" />
                 <col class="w-100" />
-                <col class="w-100" />
-                <col />
-                <col />
-                <col />
-                <col />
+                <col class="w-50" />
+                <col class="w-50" />
+                <col class="w-50" />
               </colgroup>
               <thead class="text-center border border-neutral-focus py-3">
                 <tr class="bg-neutral text-neutral-content text-xs tracking-widest h-10">

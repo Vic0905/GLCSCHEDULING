@@ -60,6 +60,10 @@
   let currentCount = $derived(selectedStudents.length)
   let isOverCapacity = $derived(maxCapacity > 0 && currentCount > maxCapacity)
 
+  let selectableCustomSchedules = $derived(
+    customSchedules.filter((cs) => cs.name?.toLowerCase().trim() !== 'sub class')
+  )
+
   let filteredStudents = $derived.by(() => {
     const query = searchQuery.toLowerCase()
 
@@ -583,16 +587,15 @@
               class="select select-bordered select-sm w-full"
             >
               <option value={null}>None</option>
-              {#each customSchedules as cs (cs.id)}
+              {#each selectableCustomSchedules as cs (cs.id)}
                 <option value={cs}>{cs.name}</option>
               {/each}
             </select>
 
             {#if displaySub}
-              <div class="alert alert-error alert-soft text-xs py-2 mt-2">
+              <div class="alert alert-info alert-soft text-lg font-bold py-2 mt-2">
                 <span>
-                  ⚡ Substitute assigned: <strong>{displaySub.name}</strong>
-                  <span class="">— manage via the Sub Class modal</span>
+                  Currently subbed by: <strong>{displaySub.name}</strong>
                 </span>
               </div>
             {/if}

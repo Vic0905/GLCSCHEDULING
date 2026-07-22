@@ -12,11 +12,11 @@
 }
 
 /* Make Grid.js cells highlight on hover */
-.gridjs-table td:hover {
-  background-color: #d1fae5 !important; /* Tailwind's green-100 */
+/* .gridjs-table td:hover {
+  background-color: #d1fae5 !important;
   transition: background-color 0.2s ease;
   cursor: pointer;
-}
+} */
 
 @plugin "daisyui" {
   themes:

@@ -1,7 +1,6 @@
 <script>
   import { onMount } from 'svelte'
   import { Grid, h } from 'gridjs'
-  import 'gridjs/dist/theme/mermaid.css'
   import { toast } from 'svelte-sonner'
   import { pb } from '../../../../../lib/Pocketbase.svelte'
 
@@ -102,7 +101,14 @@
         data: [], // Start empty
         search: true,
         pagination: { limit: 10 },
-        className: { table: 'table w-full', th: 'text-center', td: 'text-center' },
+        className: {
+          table: 'table w-full',
+          th: 'text-center',
+          td: 'text-center',
+          search: 'input input-sm m-5',
+          pagination: 'flex flex-row justify-between mt-5',
+          paginationButton: 'btn btn-sm',
+        },
       }).render(gridElement)
     }
 

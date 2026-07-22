@@ -1,7 +1,6 @@
 <script>
   import { onDestroy, onMount, tick } from 'svelte'
   import { Grid, h } from 'gridjs'
-  import 'gridjs/dist/theme/mermaid.css'
   import { toast } from 'svelte-sonner'
   import { pb } from '../../../../lib/Pocketbase.svelte'
   //   import { pb } from '../../../lib/Pocketbase.svelte'
@@ -335,7 +334,7 @@
         },
         ...cachedTimeslots.map((ts) => ({
           id: ts.id,
-          width: '180px',
+          width: '200px',
           name: h('div', { class: 'flex flex-col items-center gap-0.5' }, [h('span', null, `${ts.start} - ${ts.end}`)]),
           formatter: formatCell,
         })),
@@ -384,9 +383,12 @@
           },
           height: 'calc(100vh - 220px)',
           className: {
-            table: 'w-full border text-xs !border-collapse',
+            table: 'table w-full',
             th: 'text-center',
             td: 'text-center',
+            search: 'input input-sm m-5',
+            pagination: 'flex flex-row justify-between mt-5',
+            paginationButton: 'btn btn-sm',
           },
           style: { table: { 'table-layout': 'fixed' } },
         }).render(document.getElementById('teacher-grid'))
@@ -510,6 +512,7 @@
   #teacher-grid :global(td) {
     padding: 0 !important;
     vertical-align: stretch;
+    position: relative;
   }
 
   #teacher-grid :global(th) {

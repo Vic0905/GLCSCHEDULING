@@ -1,7 +1,6 @@
 <script>
   import { onMount, tick } from 'svelte'
   import { Grid, h } from 'gridjs'
-  import 'gridjs/dist/theme/mermaid.css'
   import { toast } from 'svelte-sonner'
   //   import { pb } from '../../../lib/Pocketbase.svelte'
   import CombineModal from './combineModal.svelte'
@@ -348,7 +347,7 @@
         const counts = emptyCountMap.get(t.id) || { main: 0, annex2: 0 }
         return {
           id: t.id,
-          width: '180px',
+          width: '200px',
           name: h('div', { class: 'flex flex-col items-center gap-0.5' }, [
             h('span', null, `${t.start} - ${t.end}`),
             h('div', { class: 'flex gap-1' }, [
@@ -429,11 +428,36 @@
       gridInstance = new Grid({
         columns,
         data,
+        search: {
+          selector: (cell) => {
+            if (!cell || typeof cell !== 'object') return String(cell ?? '')
+
+            // Teacher / Room columns → use the `.value` property
+            if ('value' in cell) return cell.value ?? ''
+
+            // Separator rows → skip
+            if (cell.isSeparator) return ''
+
+            // Schedule cells → build a searchable string from all relevant fields
+            if (!cell.schedules?.length) return ''
+
+            const first = cell.schedules[0]
+            const parts = [
+              first.subject?.name ?? '',
+              first.teacher?.name ?? '',
+              ...cell.schedules.flatMap((s) => s.students.map((std) => std.name)),
+            ]
+            return parts.join(' ')
+          },
+        },
         height: 'calc(100vh - 220px)',
         className: {
-          table: 'w-full text-xs',
+          table: 'table w-full',
           th: 'text-center',
           td: 'text-center',
+          search: 'input input-sm m-5',
+          pagination: 'flex flex-row justify-between mt-5',
+          paginationButton: 'btn btn-sm',
         },
         style: { table: { 'table-layout': 'fixed' } },
       }).render(document.getElementById('daily-grid'))

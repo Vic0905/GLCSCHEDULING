@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte'
   import { Grid, h } from 'gridjs'
-  import 'gridjs/dist/theme/mermaid.css'
+
   import { toast } from 'svelte-sonner'
   import Papa from 'papaparse'
   import { pb } from '../../../../../lib/Pocketbase.svelte'
@@ -119,7 +119,8 @@
   }
 
   async function batchFetch(requests) {
-    const res = await fetch(`${pb.baseUrl}/api/batch`, {
+    const base = pb.baseUrl.replace(/\/+$/, '') // strip trailing slash(es)
+    const res = await fetch(`${base}/api/batch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -303,8 +304,11 @@
       pagination: { limit: 10 },
       className: {
         table: 'table w-full',
-        th: 'text-center text-xs',
-        td: 'text-xs whitespace-normal',
+        th: 'text-center',
+        td: 'text-center',
+        search: 'input input-sm m-5',
+        pagination: 'flex flex-row justify-between mt-5',
+        paginationButton: 'btn btn-sm',
       },
     }).render(gridElement)
   }
@@ -1159,49 +1163,41 @@
         <div class="bg-base-200 rounded-lg p-3">
           <p class="text-xs font-semibold text-base-content/60 uppercase tracking-wide mb-2">Preview</p>
           <div class="overflow-x-auto max-h-48 overflow-y-auto">
-            {#if bulkPreview.length > 0}
-              <table class="table table-xs w-full">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>English Name</th>
-                    <th>Course</th>
-                    <th>Level</th>
-                    <th>Remarks</th>
-                    <th>Start</th>
-                    <th>End</th>
-                    <th>Status</th>
+            <table class="table table-xs w-full">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>English Name</th>
+                  <th>Course</th>
+                  <th>Level</th>
+                  <th>Remarks</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each bulkPreview as row}
+                  {@const isDupe = students.some((s) => s.englishName?.toLowerCase() === row.englishName.toLowerCase())}
+                  <tr class={isDupe ? 'opacity-40' : ''}>
+                    <td class="text-base-content/70">{row.name || '—'}</td>
+                    <td class={isDupe ? 'line-through' : 'font-medium'}>{row.englishName}</td>
+                    <td class="text-base-content/70">{row.course || '—'}</td>
+                    <td class="text-base-content/70">{row.level || '—'}</td>
+                    <td class="text-base-content/70">{row.remarks || '—'}</td>
+                    <td class="text-base-content/70">{row.start || '—'}</td>
+                    <td class="text-base-content/70">{row.end || '—'}</td>
+                    <td>
+                      {#if isDupe}
+                        <span class="badge badge-xs badge-warning">duplicate</span>
+                      {:else}
+                        <span class="badge badge-xs {STATUS_BADGE[bulkDefaultStatus]}">{bulkDefaultStatus}</span>
+                      {/if}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {#each bulkPreview as row}
-                    {@const isDupe = students.some(
-                      (s) => s.englishName?.toLowerCase() === row.englishName.toLowerCase()
-                    )}
-                    <tr class={isDupe ? 'opacity-40' : ''}>
-                      <td class="text-base-content/70">{row.name || '—'}</td>
-                      <td class={isDupe ? 'line-through' : 'font-medium'}>{row.englishName}</td>
-                      <td class="text-base-content/70">{row.course || '—'}</td>
-                      <td class="text-base-content/70">{row.level || '—'}</td>
-                      <td class="text-base-content/70">{row.remarks || '—'}</td>
-                      <td class="text-base-content/70">{row.start || '—'}</td>
-                      <td class="text-base-content/70">{row.end || '—'}</td>
-                      <td>
-                        {#if isDupe}
-                          <span class="badge badge-xs badge-warning">duplicate</span>
-                        {:else}
-                          <span class="badge badge-xs {STATUS_BADGE[bulkDefaultStatus]}">{bulkDefaultStatus}</span>
-                        {/if}
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            {:else}
-              <div class="text-center text-base-content/40 py-8 text-sm">
-                Enter student data above — preview will appear here
-              </div>
-            {/if}
+                {/each}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

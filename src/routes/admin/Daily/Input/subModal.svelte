@@ -373,7 +373,7 @@
 
 {#if show}
   <dialog class="modal modal-open">
-    <div class="modal-box max-w-3xl border border-base-300 shadow-2xl">
+    <div class="modal-box max-w-4xl border border-base-300 shadow-2xl">
       <!-- Header -->
       <header class="mb-6 text-center">
         <h3 class="text-xl font-bold">Sub Class Assignment</h3>
@@ -477,7 +477,9 @@
             {/if}
 
             {#if existingSub}
-              <div class="alert alert-info alert-soft text-xs py-2 mt-3">
+              <div
+                class="alert alert-info alert-soft flex items-center justify-center text-center text-sm font-bold py-10 mt-3"
+              >
                 <span>Currently subbed by <strong>{existingSub.name}</strong>.</span>
               </div>
             {/if}
@@ -576,7 +578,7 @@
           <button
             class="btn btn-error btn-soft"
             onclick={quickRemove}
-            disabled={loading || scheduleLoading || confirmingSave || !recordIds.length}
+            disabled={loading || scheduleLoading || confirmingSave || !recordIds.length || hasChange}
           >
             Remove Sub
           </button>

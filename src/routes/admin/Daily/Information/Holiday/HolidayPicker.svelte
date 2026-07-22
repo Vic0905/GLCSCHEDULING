@@ -7,6 +7,8 @@
   let specialDays = $state([])
   let isLoading = $state(false)
   let showModal = $state(false)
+  let deleteConfirm = $state({ show: false, item: null })
+  let clearConfirm = $state({ show: false, count: 0, dateStr: null, resolve: null })
   let currentMonth = $state(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
 
   let formData = $state({
@@ -103,10 +105,58 @@
     }
   }
 
+  // --- Batch-delete existing dailySchedule records for a date (mirrors "Clear Day") ---
+  async function clearSchedulesForDate(dateStr) {
+    try {
+      const records = await pb.collection('dailySchedule').getFullList({
+        filter: `date >= "${dateStr} 00:00:00" && date <= "${dateStr} 23:59:59"`,
+        fields: 'id,date,room,timeslot',
+      })
+
+      if (!records.length) return
+
+      const ok = await new Promise((resolve) => {
+        clearConfirm = { show: true, count: records.length, dateStr, resolve }
+      })
+      if (!ok) return
+
+      const b = pb.createBatch()
+      records.forEach((r) => b.collection('dailySchedule').delete(r.id))
+      await b.send()
+
+      try {
+        await pb.collection('activityLog').create({
+          action: 'clear',
+          performedBy: pb.authStore.record?.id,
+          targetId: dateStr,
+          details: {
+            rangeStart: dateStr,
+            rangeEnd: dateStr,
+            roomType: 'all',
+            count: records.length,
+          },
+        })
+      } catch (err) {
+        console.error('Failed to write activity log:', err)
+      }
+
+      toast.success(`Cleared ${records.length} schedule${records.length === 1 ? '' : 's'} from ${dateStr}`)
+    } catch (err) {
+      console.error('Failed to clear schedules for date:', err)
+      toast.error('Failed to clear existing schedules for this date')
+    }
+  }
+
+  function resolveClearConfirm(value) {
+    clearConfirm.resolve?.(value)
+    clearConfirm = { show: false, count: 0, dateStr: null, resolve: null }
+  }
+
   // --- Save (Create/Update) ---
   async function saveSpecialDay() {
     const name = formData.name.trim()
     const date = formData.date
+    const status = formData.status // capture before formData resets below
 
     if (!name || !date) {
       toast.error('Please fill in all fields')
@@ -124,14 +174,14 @@
         await pb.collection('holiday').update(formData.id, {
           name,
           date,
-          Status: formData.status,
+          Status: status,
         })
         toast.success('Updated')
       } else {
         await pb.collection('holiday').create({
           name,
           date,
-          Status: formData.status,
+          Status: status,
         })
         toast.success('Created')
       }
@@ -143,6 +193,8 @@
         date: '',
         status: 'No Class',
       }
+
+      await clearSchedulesForDate(date)
       await loadSpecialDays()
     } catch (err) {
       console.error('Save failed:', err)
@@ -151,8 +203,14 @@
   }
 
   // --- Delete ---
-  async function deleteSpecialDay(item) {
-    if (!confirm(`Delete "${item.name}"?`)) return
+  function requestDelete(item) {
+    deleteConfirm = { show: true, item }
+  }
+
+  async function confirmDelete() {
+    const item = deleteConfirm.item
+    if (!item) return
+    deleteConfirm = { show: false, item: null }
 
     try {
       await pb.collection('holiday').delete(item.id)
@@ -323,8 +381,8 @@
           <button
             class="btn btn-error btn-soft"
             onclick={() => {
-              deleteSpecialDay({ id: formData.id, name: formData.name })
               showModal = false
+              requestDelete({ id: formData.id, name: formData.name })
             }}
           >
             Delete
@@ -338,6 +396,50 @@
             {formData.id ? 'Update' : 'Create'}
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if deleteConfirm.show}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="modal modal-open bg-black/50"
+    onclick={(e) => e.target === e.currentTarget && (deleteConfirm = { show: false, item: null })}
+  >
+    <div class="modal-box max-w-sm p-6">
+      <h3 class="text-lg font-bold tracking-tight">Delete special day?</h3>
+      <p class="text-sm text-base-content/60 mt-2">
+        This will permanently delete
+        <span class="font-semibold text-base-content">"{deleteConfirm.item?.name}"</span>. This can't be undone.
+      </p>
+      <div class="modal-action mt-6">
+        <button class="btn btn-ghost btn-soft" onclick={() => (deleteConfirm = { show: false, item: null })}>
+          Cancel
+        </button>
+        <button class="btn btn-error" onclick={confirmDelete}>Delete</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if clearConfirm.show}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal modal-open bg-black/50" onclick={(e) => e.target === e.currentTarget && resolveClearConfirm(false)}>
+    <div class="modal-box max-w-sm p-6">
+      <h3 class="text-lg font-bold tracking-tight">
+        Replace existing schedule{clearConfirm.count === 1 ? '' : 's'}?
+      </h3>
+      <p class="text-sm text-base-content/60 mt-2">
+        {clearConfirm.count} schedule{clearConfirm.count === 1 ? '' : 's'} already exist{clearConfirm.count === 1
+          ? 's'
+          : ''} on {clearConfirm.dateStr}. Delete {clearConfirm.count === 1 ? 'it' : 'them'} to make room for the new schedule?
+      </p>
+      <div class="modal-action mt-6">
+        <button class="btn btn-ghost btn-soft" onclick={() => resolveClearConfirm(false)}>Cancel</button>
+        <button class="btn btn-error" onclick={() => resolveClearConfirm(true)}>Delete</button>
       </div>
     </div>
   </div>

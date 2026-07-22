@@ -1,7 +1,6 @@
 <script>
   import { onDestroy, onMount, tick } from 'svelte'
   import { Grid, h } from 'gridjs'
-  import 'gridjs/dist/theme/mermaid.css'
   import { toast } from 'svelte-sonner'
   import { pb } from '../../../../lib/Pocketbase.svelte'
   import CustomSched from '../Information/Custom/customSched.svelte'
@@ -119,7 +118,9 @@
 
     return h(
       'div',
-      { class: `flex flex-col gap-1 p-2 items-center justify-center text-center w-full h-full ${bgClass}` },
+      {
+        class: `flex flex-col gap-1 p-2 items-center justify-center text-center w-full h-full${bgClass}`,
+      },
       items.map((item) =>
         h(
           'div',
@@ -363,7 +364,10 @@
           name: 'Remarks',
           width: '120px',
           formatter: (cell) => {
-            const style = cell.colorRemark ? `background:${cell.colorRemark}20; color:${cell.colorRemark};` : ''
+            const baseBg = (cell.bgClass || '').includes('neutral-100') ? '#f5f5f5' : '#ffffff'
+            const style = cell.colorRemark
+              ? `background: linear-gradient(${cell.colorRemark}20, ${cell.colorRemark}20), ${baseBg}; color:${cell.colorRemark};`
+              : ''
             return h(
               'div',
               {
@@ -376,7 +380,7 @@
         },
         ...cachedTimeslots.map((ts) => ({
           id: ts.id,
-          width: '180px',
+          width: '200px',
           name: h('div', { class: 'flex flex-col items-center gap-0.5' }, [h('span', null, `${ts.start} - ${ts.end}`)]),
           formatter: formatCell,
         })),
@@ -414,9 +418,12 @@
           sort: false,
           pagination: false,
           className: {
-            table: 'w-full text-xs !border-collapse',
+            table: 'table w-full',
             th: 'text-center',
             td: 'text-center',
+            search: 'input input-sm m-5',
+            pagination: 'flex flex-row justify-between mt-5',
+            paginationButton: 'btn btn-sm',
           },
           style: { table: { 'table-layout': 'fixed' } },
         }).render(document.getElementById('student-grid'))
