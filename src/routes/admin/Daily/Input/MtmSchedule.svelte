@@ -278,8 +278,8 @@
    */
   function normalizeSchedules(rawSchedules) {
     return rawSchedules.map((s) => ({
-      roomId: s.expand?.room?.id,
-      timeslotId: s.expand?.timeslot?.id,
+      roomId: s.room,
+      timeslotId: s.timeslot,
       students: s.expand?.student ? [{ id: s.expand.student.id, name: s.expand.student.englishName }] : [],
       subject: s.expand?.subject,
       teacher: s.expand?.teacher,
@@ -519,8 +519,16 @@
             filter: 'roomType = "mtm"',
           }),
       pb.collection('dailySchedule').getFullList({
+        batch: 2000,
         filter: `date >= "${startDateStr}" && date <= "${endDateStr}"`,
-        expand: 'teacher,student,subject,room,timeslot,customSchedule',
+        expand: 'teacher,student,subject,customSchedule',
+        fields: [
+          'id,date,status,room,timeslot,teacher,student,subject,customSchedule',
+          'expand.teacher.id,expand.teacher.name',
+          'expand.student.id,expand.student.englishName',
+          'expand.subject.id,expand.subject.name',
+          'expand.customSchedule.id,expand.customSchedule.name,expand.customSchedule.color',
+        ].join(','),
       }),
     ])
 

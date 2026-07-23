@@ -194,8 +194,17 @@
 
       // Fetch dailySchedule records for the selected day
       let schedules = await pb.collection('dailySchedule').getFullList({
+        batch: 2000,
         filter: `date >= "${startDateStr}" && date <= "${endDateStr}"`,
-        expand: 'teacher,student,subject,room,timeslot,customSchedule',
+        expand: 'teacher,student,subject,room,customSchedule',
+        fields: [
+          'id,date,status,timeslot,student,subject,room,customSchedule',
+          'expand.teacher.name',
+          'expand.student.id,expand.student.studentId,expand.student.name,expand.student.englishName,expand.student.course,expand.student.level,expand.student.status,expand.student.remarks,expand.student.colorRemark',
+          'expand.subject.name',
+          'expand.room.name',
+          'expand.customSchedule.name,expand.customSchedule.color',
+        ].join(','),
       })
 
       // On a holiday, only show records whose date exactly matches
@@ -210,7 +219,7 @@
       const scheduledStudentMap = new Map()
 
       for (const s of schedules) {
-        const timeslotId = s.expand?.timeslot?.id
+        const timeslotId = s.timeslot
         if (!timeslotId) continue
 
         const entry = {
@@ -537,6 +546,7 @@
   #student-grid :global(td) {
     padding: 0 !important;
     vertical-align: stretch;
+    position: relative;
   }
 
   #student-grid :global(th) {
@@ -545,8 +555,6 @@
     z-index: 20;
     background-color: #535252;
     color: #ffffff;
-    text-align: center;
-    vertical-align: middle;
   }
 
   /* Sticky columns for student info */

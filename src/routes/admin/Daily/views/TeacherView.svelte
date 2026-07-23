@@ -195,8 +195,16 @@
 
       // Fetch dailySchedule records for the selected day
       let schedules = await pb.collection('dailySchedule').getFullList({
+        batch: 2000,
         filter: `date >= "${selectedDate} 00:00:00" && date <= "${selectedDate} 23:59:59"`,
-        expand: 'teacher,student,subject,room,timeslot,customSchedule',
+        expand: 'student,subject,room,customSchedule',
+        fields: [
+          'id,date,status,teacher,timeslot,student,subject,room,customSchedule',
+          'expand.student.id,expand.student.englishName',
+          'expand.subject.name',
+          'expand.room.name',
+          'expand.customSchedule.name,expand.customSchedule.color',
+        ].join(','),
       })
 
       // On a holiday, only show records whose date exactly matches
@@ -210,8 +218,8 @@
       const bookedTeacherIds = new Set()
 
       for (const s of schedules) {
-        const teacherId = s.expand?.teacher?.id
-        const timeslotId = s.expand?.timeslot?.id
+        const teacherId = s.teacher
+        const timeslotId = s.timeslot
         if (!teacherId || !timeslotId) continue
 
         bookedTeacherIds.add(teacherId)
