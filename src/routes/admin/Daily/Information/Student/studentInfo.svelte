@@ -436,24 +436,35 @@
 
     try {
       const student = await pb.collection('student').getOne(id)
+      const userId = getId(student.user)
 
-      // delete schedules first (if still needed)
+      // ── TEMP DEBUG ──
+      console.log('raw student.user:', JSON.stringify(student.user))
+      console.log('resolved userId:', userId)
+      console.log('auth model:', JSON.stringify(pb.authStore.model))
+      console.log('auth valid:', pb.authStore.isValid)
+      // ────────────────
+
       const allSchedules = await pb.collection('lessonSchedule').getFullList()
       const targets = allSchedules.filter((item) => getId(item.student) === id)
       await Promise.all(targets.map((item) => pb.collection('lessonSchedule').delete(item.id)))
 
-      // delete student
       await pb.collection('student').delete(id)
 
-      // ✅ delete linked user (same as teacher)
-      if (student.user) {
-        await pb.collection('users').delete(student.user)
+      if (userId) {
+        try {
+          await pb.collection('users').delete(userId)
+        } catch (userErr) {
+          console.error('Failed to delete linked user:', userErr)
+          toast.warning('Student deleted, but linked user account could not be removed')
+        }
       }
 
       toast.success('Student deleted')
       await loadStudents()
-    } catch {
-      toast.error('Failed to delete student')
+    } catch (err) {
+      console.error(err)
+      toast.error(err?.response?.message || 'Failed to delete student')
     }
   }
 
@@ -534,17 +545,22 @@
       const nameMap = Object.fromEntries(records.map((r) => [r.id, r.englishName || r.name || 'Unknown']))
 
       // delete schedules
-      const allSchedules = await pb.collection('lessonSchedule').getFullList()
+      const allSchedules = await pb.collection('dailySchedule').getFullList()
       const targets = allSchedules.filter((item) => ids.includes(getId(item.student)))
 
-      await Promise.all(targets.map((item) => pb.collection('lessonSchedule').delete(item.id)))
+      await Promise.all(targets.map((item) => pb.collection('dailySchedule').delete(item.id)))
 
       // delete students
       await Promise.all(ids.map((id) => pb.collection('student').delete(id)))
 
-      // ✅ delete linked users (same pattern as teacher)
-      await Promise.allSettled(records.filter((s) => s.user).map((s) => pb.collection('users').delete(s.user)))
-
+      const userResults = await Promise.allSettled(
+        records.filter((s) => s.user).map((s) => pb.collection('users').delete(s.user))
+      )
+      const userFailures = userResults.filter((r) => r.status === 'rejected')
+      if (userFailures.length) {
+        console.error('Some linked users failed to delete:', userFailures)
+        toast.warning(`${userFailures.length} linked user account(s) could not be removed`)
+      }
       toast.success(`${ids.length} student(s) deleted`)
       selectedStudents = new Set()
       await loadStudents()

@@ -30,7 +30,7 @@
   // ─────────────────────────────────────────────
   // roomType: which roomType collection records to import into (e.g. "mtm", "grp")
   // defaultRoomFilter: regex pre-filled in the "Room filter" box for this page
-  let { onrefresh, selectedDate, roomType = 'mtm', defaultRoomFilter = '^A\\d{3}$' } = $props()
+  let { onrefresh, selectedDate, roomType = 'mtm', defaultRoomFilter = '^(A|B|ST)\\d+$' } = $props()
 
   // ─────────────────────────────────────────────
   // State
@@ -556,7 +556,9 @@
             <summary class="cursor-pointer text-neutral-500">
               {preview.stats.missingStudents.size} unmatched student name(s) — click to view
             </summary>
-            <p class="mt-1 text-neutral-600">{listPreview(preview.stats.missingStudents, 100)}</p>
+            <p class="mt-1 text-neutral-600">
+              {listPreview(preview.stats.missingStudents, preview.stats.missingStudents.size)}
+            </p>
           </details>
         {/if}
       </div>

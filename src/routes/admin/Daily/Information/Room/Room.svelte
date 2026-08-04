@@ -4,50 +4,43 @@
   import { toast } from 'svelte-sonner'
   import { pb } from '../../../../../lib/Pocketbase.svelte'
 
-  // --- State Management (Svelte 5 Runes) ---
+  // --- State Management ---
   let rooms = $state([])
-  let teachers = $state([])
+  let allTeachers = $state([])
   let showModal = $state(false)
   let gridElement = $state(null)
   let gridInstance = null
 
-  // Form State grouped into one object
   let formData = $state({
     id: null,
     name: '',
     roomType: 'mtm',
     maxStudents: 0,
     selectedTeacherId: '',
-    status: 'enabled', // Add status to form data
+    status: 'enabled',
+  })
+
+  // --- Derived State (The Magic) ---
+  // Filters out teachers that are disabled OR assigned to another enabled room
+  let availableTeachers = $derived(
+    allTeachers.filter((t) => {
+      if (t.status === 'disabled') return false
+      // Is this teacher assigned to an enabled room that is NOT the one we are currently editing?
+      const isAssigned = rooms.some((r) => r.status === 'enabled' && r.teacher === t.id && r.id !== formData.id)
+      return !isAssigned
+    })
+  )
+
+  // --- Effects ---
+  $effect(() => {
+    if (formData.roomType === 'mtm') formData.maxStudents = 1
   })
 
   $effect(() => {
-    if (formData.roomType === 'mtm') {
-      formData.maxStudents = 1
-    }
-  })
-
-  // Watch for status changes to handle teacher removal
-  $effect(() => {
-    if (formData.status === 'disabled') {
-      formData.selectedTeacherId = ''
-    }
+    if (formData.status === 'disabled') formData.selectedTeacherId = ''
   })
 
   // --- Logic ---
-
-  /**
-   * Checks whether a given teacher ID belongs to a disabled teacher.
-   * Uses the full (unfiltered) teachers list stored in allTeachers.
-   */
-  let allTeachers = $state([])
-
-  function isTeacherActive(teacherId) {
-    if (!teacherId) return false
-    const teacher = allTeachers.find((t) => t.id === teacherId)
-    return teacher ? teacher.status !== 'disabled' : false
-  }
-
   async function loadInitialData() {
     try {
       const [teacherList, roomList] = await Promise.all([
@@ -55,81 +48,38 @@
         pb.collection('roomType').getFullList({ expand: 'teacher' }),
       ])
 
-      // Keep the full list for status checks
       allTeachers = teacherList
-
-      // Only show active (non-disabled) teachers in the dropdown
-      teachers = teacherList.filter((t) => t.status !== 'disabled')
-
-      // Auto-unassign any room whose teacher is disabled — fire-and-forget in parallel
-      const disabledTeacherIds = new Set(teacherList.filter((t) => t.status === 'disabled').map((t) => t.id))
-      const roomsToFix = roomList.filter((r) => r.teacher && disabledTeacherIds.has(r.teacher))
-      if (roomsToFix.length > 0) {
-        await Promise.all(roomsToFix.map((r) => pb.collection('roomType').update(r.id, { teacher: null })))
-        // Reflect the fix locally so the grid shows Unassigned immediately
-        roomsToFix.forEach((r) => {
-          r.teacher = null
-          r.expand = {}
-        })
-      }
-
-      // Sort naturally using JS localeCompare
-      rooms = roomList.sort((a, b) => {
-        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-      })
+      rooms = roomList.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
     } catch (err) {
-      toast.error('Failed to synchronize data')
+      toast.error('Failed to load data')
     }
-  }
-
-  function checkTeacherOccupancy(teacherId) {
-    if (!teacherId) return null
-    const assigned = rooms.find((r) => r.teacher === teacherId && r.id !== formData.id && r.status === 'enabled')
-    return assigned ? assigned.name : null
   }
 
   async function saveRoom() {
-    const trimmedName = formData.name.trim()
-    if (!trimmedName) return toast.error('Room name is required')
+    if (!formData.name.trim()) return toast.error('Room name is required')
 
-    // 1. Check if name already exists (Local Check)
-    const nameExists = rooms.find((r) => r.name.toLowerCase() === trimmedName.toLowerCase() && r.id !== formData.id)
-    if (nameExists) return toast.error(`A room named "${trimmedName}" already exists!`)
-
-    // Prepare payload
-    let payload = {
-      name: trimmedName,
+    const payload = {
+      name: formData.name.trim(),
       roomType: formData.roomType,
       maxStudents: formData.maxStudents,
       status: formData.status,
-    }
-
-    // Handle teacher assignment based on room status
-    if (formData.status === 'disabled') {
-      // If room is disabled, always set teacher to null
-      payload.teacher = null
-    } else {
-      // Only check teacher occupancy for enabled rooms
-      const occupiedByName = checkTeacherOccupancy(formData.selectedTeacherId)
-      if (occupiedByName) return toast.error(`Teacher already assigned to ${occupiedByName}`)
-      payload.teacher = formData.selectedTeacherId || null
+      teacher: formData.status === 'disabled' ? null : formData.selectedTeacherId || null,
     }
 
     try {
       if (formData.id) {
         await pb.collection('roomType').update(formData.id, payload)
-        toast.success('Room updated')
       } else {
         await pb.collection('roomType').create(payload)
-        toast.success('Room created')
       }
 
+      toast.success('Room saved successfully')
       closeModal()
       await loadInitialData()
     } catch (err) {
-      // Handle Database Rejection
+      // 400 error caught here when PocketBase Unique Index fails
       if (err.status === 400) {
-        toast.error('Save failed: This room name is already in use.')
+        toast.error('Save failed: A room with this Name, Type, and Status already exists.')
       } else {
         toast.error('An unexpected error occurred.')
       }
@@ -143,21 +93,14 @@
       roomType: room.roomType,
       maxStudents: room.maxStudents,
       selectedTeacherId: room.teacher || '',
-      status: room.status || 'enabled', // Add status with fallback
+      status: room.status || 'enabled',
     }
     showModal = true
   }
 
   function closeModal() {
     showModal = false
-    formData = {
-      id: null,
-      name: '',
-      roomType: 'mtm',
-      maxStudents: 0,
-      selectedTeacherId: '',
-      status: 'enabled',
-    }
+    formData = { id: null, name: '', roomType: 'mtm', maxStudents: 0, selectedTeacherId: '', status: 'enabled' }
   }
 
   async function deleteRoom(id) {
@@ -172,12 +115,12 @@
     }
   }
 
-  // 1. Initialize the Grid ONLY ONCE
+  // Grid Initialization
   $effect(() => {
     if (gridElement && !gridInstance) {
       gridInstance = new Grid({
         columns: ['Room Name', 'Type', 'Capacity', 'Teacher', 'Status', { name: 'Actions', sort: false }],
-        data: [], // Start empty
+        data: [],
         search: true,
         pagination: { limit: 10 },
         className: {
@@ -191,7 +134,6 @@
       }).render(gridElement)
     }
 
-    // This ONLY runs when the component is actually destroyed
     return () => {
       if (gridInstance) {
         gridElement.innerHTML = ''
@@ -200,13 +142,10 @@
     }
   })
 
-  // 2. Update the data whenever 'rooms' changes
+  // Grid Data Updates
   $effect(() => {
-    const currentRooms = rooms
-
-    if (gridInstance && currentRooms.length >= 0) {
-      const data = currentRooms.map((r) => {
-        // Determine teacher display: show "(Disabled)" badge if teacher is inactive
+    if (gridInstance && rooms.length >= 0) {
+      const data = rooms.map((r) => {
         const assignedTeacher = r.expand?.teacher
         const teacherName = assignedTeacher
           ? assignedTeacher.status === 'disabled'
@@ -214,7 +153,6 @@
             : assignedTeacher.name
           : 'Unassigned'
 
-        // Status badge with appropriate styling
         const statusBadge =
           r.status === 'disabled'
             ? h('span', { className: 'badge badge-error badge-sm' }, 'Disabled')
@@ -227,22 +165,8 @@
           teacherName,
           statusBadge,
           h('div', { className: 'flex gap-2 justify-center' }, [
-            h(
-              'button',
-              {
-                className: 'btn btn-xs btn-outline btn-info',
-                onclick: () => openEdit(r),
-              },
-              'Edit'
-            ),
-            h(
-              'button',
-              {
-                className: 'btn btn-xs btn-outline btn-error',
-                onclick: () => deleteRoom(r.id),
-              },
-              'Delete'
-            ),
+            h('button', { className: 'btn btn-xs btn-outline btn-info', onclick: () => openEdit(r) }, 'Edit'),
+            h('button', { className: 'btn btn-xs btn-outline btn-error', onclick: () => deleteRoom(r.id) }, 'Delete'),
           ]),
         ]
       })
@@ -282,9 +206,7 @@
         <button class="btn btn-sm btn-circle btn-ghost" onclick={closeModal}>✕</button>
       </div>
 
-      <!-- Main Form Container -->
       <div class="flex flex-col gap-5">
-        <!-- Room Name Input -->
         <div class="form-control w-full">
           <label class="label py-1" for="room-name">
             <span class="label-text font-semibold text-base-content">Room Name</span>
@@ -298,7 +220,6 @@
           />
         </div>
 
-        <!-- Two Column Inputs Split -->
         <div class="grid grid-cols-2 gap-4">
           <div class="form-control w-full">
             <label class="label py-1" for="room-type">
@@ -329,7 +250,6 @@
           </div>
         </div>
 
-        <!-- Status Selection -->
         <div class="form-control w-full">
           <label class="label py-1" for="room-status">
             <span class="label-text font-semibold text-base-content">Room Status</span>
@@ -342,14 +262,8 @@
             <option value="enabled">Enabled</option>
             <option value="disabled">Disabled</option>
           </select>
-          {#if formData.status === 'disabled' && formData.selectedTeacherId}
-            <label class="label">
-              <span class="label-text-alt text-warning">⚠️ Teacher will be removed when saving</span>
-            </label>
-          {/if}
         </div>
 
-        <!-- Assigned Teacher Input -->
         <div class="form-control w-full">
           <label class="label py-1" for="teacher">
             <span class="label-text font-semibold text-base-content">Assigned Teacher</span>
@@ -361,19 +275,14 @@
             disabled={formData.status === 'disabled'}
           >
             <option value="">Unassigned</option>
-            {#each teachers as t}
+            <!-- Render the derived availableTeachers directly -->
+            {#each availableTeachers as t}
               <option value={t.id}>{t.name}</option>
             {/each}
           </select>
-          {#if formData.status === 'disabled'}
-            <label class="label">
-              <span class="label-text-alt text-error">Teacher assignments are disabled for inactive rooms</span>
-            </label>
-          {/if}
         </div>
       </div>
 
-      <!-- Action Footer Buttons -->
       <div class="modal-action mt-8 gap-2">
         <button class="btn btn-ghost px-6" onclick={closeModal}>Cancel</button>
         <button class="btn btn-primary px-6 shadow-sm" onclick={saveRoom}>
@@ -385,11 +294,9 @@
 {/if}
 
 <style>
-  /* Forces the vertical scrollbar to always reserve its layout space */
   :global(html) {
     scrollbar-gutter: stable;
   }
-
   :global(.gridjs-container) {
     border-radius: 0.75rem;
     overflow: hidden;

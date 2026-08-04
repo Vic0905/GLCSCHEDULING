@@ -424,8 +424,6 @@
                 .join(' ')
             },
           },
-          sort: false,
-          pagination: false,
           className: {
             table: 'table w-full',
             th: 'text-center',
@@ -542,7 +540,11 @@
     will-change: scroll-position;
   }
 
-  /* Fix padding and alignment */
+  /* --- Base Table Styles --- */
+  #student-grid :global(.gridjs-table :is(td, th)) {
+    outline: 1px solid #535252;
+  }
+
   #student-grid :global(td) {
     padding: 0 !important;
     vertical-align: stretch;
@@ -557,75 +559,43 @@
     color: #ffffff;
   }
 
-  /* Sticky columns for student info */
-  #student-grid :global(th:nth-child(1)),
+  /* --- Sticky Setup for Columns 1 to 5 --- */
+  #student-grid :global(:is(th, td):nth-child(-n + 5)) {
+    position: sticky;
+  }
+
+  #student-grid :global(th:nth-child(-n + 5)) {
+    z-index: 25;
+  }
+
+  #student-grid :global(td:nth-child(-n + 5)) {
+    z-index: 10;
+  }
+
   #student-grid :global(td:nth-child(1)) {
-    position: sticky;
+    z-index: 15; /* Specific override for column 1 */
+  }
+
+  /* --- Left Offsets --- */
+  #student-grid :global(:is(th, td):nth-child(1)) {
     left: 0;
-    z-index: 15;
   }
-
-  #student-grid :global(th:nth-child(1)) {
-    z-index: 25;
-  }
-
-  #student-grid :global(th:nth-child(2)),
-  #student-grid :global(td:nth-child(2)) {
-    position: sticky;
+  #student-grid :global(:is(th, td):nth-child(2)) {
     left: 180px;
-    z-index: 10;
   }
-
-  #student-grid :global(th:nth-child(2)) {
-    z-index: 25;
-  }
-
-  #student-grid :global(th:nth-child(3)),
-  #student-grid :global(td:nth-child(3)) {
-    position: sticky;
+  #student-grid :global(:is(th, td):nth-child(3)) {
     left: 320px;
-    z-index: 10;
   }
-
-  #student-grid :global(th:nth-child(3)) {
-    z-index: 25;
-  }
-
-  #student-grid :global(th:nth-child(4)),
-  #student-grid :global(td:nth-child(4)) {
-    position: sticky;
+  #student-grid :global(:is(th, td):nth-child(4)) {
     left: 440px;
-    z-index: 10;
   }
-
-  #student-grid :global(th:nth-child(4)) {
-    z-index: 25;
-  }
-
-  #student-grid :global(th:nth-child(5)),
-  #student-grid :global(td:nth-child(5)) {
-    position: sticky;
+  #student-grid :global(:is(th, td):nth-child(5)) {
     left: 560px;
-    z-index: 10;
   }
 
-  #student-grid :global(th:nth-child(5)) {
-    z-index: 25;
-  }
-
-  /* font bold for teacher and room td */
-  #student-grid :global(td:nth-child(1) div),
-  #student-grid :global(td:nth-child(2) div),
-  #student-grid :global(td:nth-child(3) div),
-  #student-grid :global(td:nth-child(4) div),
-  #student-grid :global(td:nth-child(5) div) {
+  /* --- Font Styles for Columns 1 to 5 --- */
+  #student-grid :global(td:nth-child(-n + 5) div) {
     font-size: 0.85rem;
     font-weight: bold;
-  }
-
-  /* stronger table border */
-  #student-grid :global(.gridjs-table td),
-  #student-grid :global(.gridjs-table th) {
-    outline: 1px solid #535252;
   }
 </style>
