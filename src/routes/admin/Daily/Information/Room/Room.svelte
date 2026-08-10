@@ -40,6 +40,11 @@
     if (formData.status === 'disabled') formData.selectedTeacherId = ''
   })
 
+  // --- Helpers ---
+  function sortRooms(list) {
+    return [...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+  }
+
   // --- Logic ---
   async function loadInitialData() {
     try {
@@ -49,7 +54,7 @@
       ])
 
       allTeachers = teacherList
-      rooms = roomList.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+      rooms = sortRooms(roomList)
     } catch (err) {
       toast.error('Failed to load data')
     }
@@ -68,14 +73,17 @@
 
     try {
       if (formData.id) {
-        await pb.collection('roomType').update(formData.id, payload)
+        const updated = await pb.collection('roomType').update(formData.id, payload, { expand: 'teacher' })
+        // Patch just the row that changed, no refetch of the whole collection
+        rooms = sortRooms(rooms.map((r) => (r.id === updated.id ? updated : r)))
       } else {
-        await pb.collection('roomType').create(payload)
+        const created = await pb.collection('roomType').create(payload, { expand: 'teacher' })
+        // Insert the new row locally, keep sort order
+        rooms = sortRooms([...rooms, created])
       }
 
       toast.success('Room saved successfully')
       closeModal()
-      await loadInitialData()
     } catch (err) {
       // 400 error caught here when PocketBase Unique Index fails
       if (err.status === 400) {
@@ -107,8 +115,9 @@
     if (confirm('Are you sure you want to delete this room?')) {
       try {
         await pb.collection('roomType').delete(id)
+        // Remove just the deleted row locally, no refetch
+        rooms = rooms.filter((r) => r.id !== id)
         toast.success('Deleted')
-        await loadInitialData()
       } catch (err) {
         toast.error('Delete failed')
       }

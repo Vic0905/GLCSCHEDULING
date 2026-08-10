@@ -90,12 +90,22 @@
     },
   }
 
+  // NEW: rooms without a G/H prefix that should still be grouped with Annex 2
+  // and always sorted after the H-prefixed rooms within that section.
+  const ANNEX2_EXTRA_ROOMS = ['AUSTRALIA', 'IRELAND', 'MALTA', 'PHILIPPINES']
+
   /**
    * Returns a Tailwind bg+text class pair based on room name and BUILDING_CONFIG.
    */
   function getBgClass(roomName) {
     if (!roomName) return ''
     const upper = roomName.toUpperCase()
+
+    // Country rooms aren't physical rooms in an aisle, so they don't
+    // participate in the annex2 aisle-banding logic — always plain white.
+    if (ANNEX2_EXTRA_ROOMS.includes(upper)) {
+      return 'bg-white text-neutral-800'
+    }
 
     for (const config of Object.values(BUILDING_CONFIG)) {
       if (!upper.startsWith(config.prefix)) continue
@@ -113,14 +123,31 @@
   /**
    * Returns the building section for a room name:
    * 'main' for G-prefixed rooms (Main Building),
-   * 'annex2' for H-prefixed rooms (Annex 2), null otherwise.
+   * 'annex2' for H-prefixed rooms or ANNEX2_EXTRA_ROOMS (Annex 2), null otherwise.
    */
   function getBuildingSection(roomName) {
     if (!roomName) return null
     const upper = roomName.toUpperCase()
     if (upper.startsWith('G')) return 'main'
     if (upper.startsWith('H')) return 'annex2'
+    // NEW: catch the non-prefixed Annex 2 extras
+    if (ANNEX2_EXTRA_ROOMS.includes(upper)) return 'annex2'
     return null
+  }
+
+  // NEW: forces room display order to main -> annex2 (H rooms) -> annex2 extras,
+  // instead of relying on plain alphabetical sort from PocketBase.
+  function compareRoomsForDisplay(a, b) {
+    const sectionOrder = { main: 0, annex2: 1 }
+    const orderA = sectionOrder[getBuildingSection(a.name)] ?? 2
+    const orderB = sectionOrder[getBuildingSection(b.name)] ?? 2
+    if (orderA !== orderB) return orderA - orderB
+
+    const extraA = ANNEX2_EXTRA_ROOMS.includes(a.name?.toUpperCase())
+    const extraB = ANNEX2_EXTRA_ROOMS.includes(b.name?.toUpperCase())
+    if (extraA !== extraB) return extraA ? 1 : -1
+
+    return (a.name || '').localeCompare(b.name || '')
   }
 
   function saveScroll() {
@@ -364,7 +391,7 @@
     let annexInserted = false
 
     for (const room of rooms) {
-      // Insert separator row before the first Annex 2 (H-prefixed) room
+      // Insert separator row before the first Annex 2 (H-prefixed or extra) room
       if (!annexInserted && getBuildingSection(room.name) === 'annex2') {
         const separatorRow = [
           {
@@ -525,6 +552,10 @@
         ].join(','),
       }),
     ])
+
+    // NEW: enforce main -> annex2 (H rooms) -> annex2 extras display order,
+    // instead of relying on the plain alphabetical `sort: 'name'` above.
+    rooms.sort(compareRoomsForDisplay)
 
     if (!cachedTimeslots.length) cachedTimeslots = timeslots
     if (!cachedRooms.length) cachedRooms = rooms
@@ -701,7 +732,7 @@
         Clear
       </button>
       <button class="btn btn-outline btn-sm" onclick={() => showStatusModal.open()} disabled={isLoading}> Show </button>
-      <!-- <button class="btn btn-outline btn-sm" onclick={() => importModal.open()} disabled={isLoading}> Import </button> -->
+      <button class="btn btn-outline btn-sm" onclick={() => importModal.open()} disabled={isLoading}> Import </button>
       <button class="btn btn-outline btn-sm" onclick={() => copyModal.open()} disabled={isLoading}> Copy </button>
       <button
         class="btn btn-outline btn-sm"
@@ -739,7 +770,7 @@
   {selectedDate}
   onrefresh={refreshWithScroll}
   roomType="grp"
-  defaultRoomFilter="^[GH]\d+$"
+  defaultRoomFilter="^([GH]\d+|AUSTRALIA|IRELAND|MALTA|PHILIPPINES)$"
 />
 
 <!-- ─────────────────────────────────────────── -->

@@ -28,7 +28,13 @@
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   async function batchFetch(requests) {
-    const res = await fetch(`${pb.baseUrl}/api/batch`, {
+    // CHANGED: strip any trailing slash from pb.baseUrl before concatenating.
+    // pb.baseUrl already ends in "/", so appending "/api/batch" produced a
+    // double slash ("...online//api/batch"). The server normalizes that with
+    // a redirect, and browsers refuse to follow a redirect on a CORS
+    // preflight (OPTIONS) request — that's what was causing the CORS error.
+    const base = pb.baseUrl.replace(/\/+$/, '')
+    const res = await fetch(`${base}/api/batch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

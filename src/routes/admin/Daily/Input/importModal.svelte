@@ -542,10 +542,15 @@
                   preview.stats.missingSubjects
                 )}.
               {/if}
-              {#if preview.stats.skippedNoTeacher}
-                {preview.stats.skippedNoTeacher} cell(s) skipped — teacher not found: {listPreview(
-                  preview.stats.missingTeachers
-                )}.
+              {#if preview.stats.missingTeachers.size}
+                <details class="text-xs">
+                  <summary class="cursor-pointer text-neutral-500">
+                    {preview.stats.missingTeachers.size} unmatched teacher name(s) — click to view
+                  </summary>
+                  <p class="mt-1 text-neutral-600">
+                    {listPreview(preview.stats.missingTeachers, preview.stats.missingTeachers.size)}
+                  </p>
+                </details>
               {/if}
             </span>
           </div>

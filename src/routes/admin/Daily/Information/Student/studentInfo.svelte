@@ -39,6 +39,8 @@
   let gridInstance = null
   let isProcessing = $state(false)
   let importProgress = $state({ current: 0, total: 0 })
+  let showImportModal = $state(false)
+  let importStage = $state('')
   let selectedStudents = $state(new Set())
   let formData = $state({ ...BLANK_FORM })
   let bulkRawInput = $state('')
@@ -142,6 +144,25 @@
       onProgress?.(allResults.length, requests.length)
     }
     return allResults
+  }
+
+  // ── ADDED: bounded-concurrency runner for work that can't be batched
+  // (e.g. user creation, which needs sequential read-then-decide logic per item,
+  // but doesn't need to be fully serial across items) ─────────────────────────
+  async function runWithConcurrency(items, limit, worker, onProgress) {
+    const results = new Array(items.length)
+    let idx = 0
+    let completed = 0
+    async function next() {
+      while (idx < items.length) {
+        const i = idx++
+        results[i] = await worker(items[i], i)
+        completed++
+        onProgress?.(completed, items.length)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) || 1 }, next))
+    return results
   }
 
   // ── ADDED: get friday of the date range helper ─────────────────────────────────────────────
@@ -438,18 +459,7 @@
       const student = await pb.collection('student').getOne(id)
       const userId = getId(student.user)
 
-      // ── TEMP DEBUG ──
-      console.log('raw student.user:', JSON.stringify(student.user))
-      console.log('resolved userId:', userId)
-      console.log('auth model:', JSON.stringify(pb.authStore.model))
-      console.log('auth valid:', pb.authStore.isValid)
-      // ────────────────
-
-      const allSchedules = await pb.collection('lessonSchedule').getFullList()
-      const targets = allSchedules.filter((item) => getId(item.student) === id)
-      await Promise.all(targets.map((item) => pb.collection('lessonSchedule').delete(item.id)))
-
-      await pb.collection('student').delete(id)
+      await pb.collection('student').delete(id) // cascade handles dailySchedule cleanup
 
       if (userId) {
         try {
@@ -494,15 +504,27 @@
       const added = results.filter((r) => r.status >= 200 && r.status < 300).length
       const failed = results.filter((r) => r.status < 200 || r.status >= 300).length
 
-      // ── ADDED: create a user account for each successfully created student
+      // ── UPDATED: create user accounts with bounded concurrency instead of
+      // one-by-one, then batch-link the resulting user IDs back to students ──
       const successful = toCreate
         .map((row, i) => ({ row, result: results[i] }))
         .filter(({ result }) => result.status >= 200 && result.status < 300)
 
-      for (const { row, result } of successful) {
-        const userId = await createStudentUser(row.englishName)
-        if (userId) await pb.collection('student').update(result.body.id, { user: userId })
-      }
+      const userIds = await runWithConcurrency(successful, 8, ({ row }) => createStudentUser(row.englishName))
+
+      const linkRequests = successful
+        .map(({ result }, i) =>
+          userIds[i]
+            ? {
+                method: 'PATCH',
+                url: `/api/collections/student/records/${result.body.id}`,
+                body: { user: userIds[i] },
+              }
+            : null
+        )
+        .filter(Boolean)
+
+      if (linkRequests.length) await batchFetchChunked(linkRequests, 50)
 
       toast.success(
         [added && `${added} added`, skipped && `${skipped} skipped`, failed && `${failed} failed`]
@@ -538,20 +560,21 @@
     try {
       const ids = Array.from(selectedStudents)
 
-      const records = await pb.collection('student').getFullList({
-        filter: ids.map((id) => `id="${id}"`).join(' || '),
-      })
+      // ── UPDATED: use already-loaded state instead of re-fetching with a
+      // giant "id=... || id=..." filter string, which breaks past ~50 ids ──
+      const records = students.filter((s) => ids.includes(s.id))
 
-      const nameMap = Object.fromEntries(records.map((r) => [r.id, r.englishName || r.name || 'Unknown']))
-
-      // delete schedules
-      const allSchedules = await pb.collection('dailySchedule').getFullList()
-      const targets = allSchedules.filter((item) => ids.includes(getId(item.student)))
-
-      await Promise.all(targets.map((item) => pb.collection('dailySchedule').delete(item.id)))
-
-      // delete students
-      await Promise.all(ids.map((id) => pb.collection('student').delete(id)))
+      // ── UPDATED: batched deletes instead of N individual concurrent
+      // DELETE requests. Cascade delete on dailySchedule.student handles
+      // schedule cleanup automatically, so no manual lookup/delete needed. ──
+      const results = await batchFetchChunked(
+        ids.map((id) => ({
+          method: 'DELETE',
+          url: `/api/collections/student/records/${id}`,
+        }))
+      )
+      const deleted = results.filter((r) => r.status >= 200 && r.status < 300).length
+      const failed = results.length - deleted
 
       const userResults = await Promise.allSettled(
         records.filter((s) => s.user).map((s) => pb.collection('users').delete(s.user))
@@ -561,10 +584,12 @@
         console.error('Some linked users failed to delete:', userFailures)
         toast.warning(`${userFailures.length} linked user account(s) could not be removed`)
       }
-      toast.success(`${ids.length} student(s) deleted`)
+
+      toast.success([deleted && `${deleted} deleted`, failed && `${failed} failed`].filter(Boolean).join(', '))
       selectedStudents = new Set()
       await loadStudents()
-    } catch {
+    } catch (err) {
+      console.error(err)
       toast.error('Bulk delete failed')
     } finally {
       isProcessing = false
@@ -631,6 +656,8 @@
         const nextId = await getNextStudentId()
 
         isProcessing = true
+        showImportModal = true
+        importStage = 'Creating student records'
         importProgress = { current: 0, total: toCreate.length }
         try {
           const results = await batchFetchChunked(
@@ -645,16 +672,46 @@
           const added = results.filter((r) => r.status >= 200 && r.status < 300).length
           const failed = results.filter((r) => r.status < 200 || r.status >= 300).length
 
-          // ── ADDED: create a user account for each successfully created student
+          // ── UPDATED: create user accounts with bounded concurrency (8 at a
+          // time) instead of one-by-one, then batch-link user IDs back to
+          // their student records instead of individual sequential updates.
+          // Each stage updates importStage/importProgress so the modal keeps
+          // moving instead of appearing frozen after the first stage. ──
           const successful = toCreate
             .map((row, i) => ({ row, result: results[i] }))
             .filter(({ result }) => result.status >= 200 && result.status < 300)
 
-          for (const { row, result } of successful) {
-            const userId = await createStudentUser(row.englishName)
-            if (userId) await pb.collection('student').update(result.body.id, { user: userId })
+          let userIds = []
+          if (successful.length) {
+            importStage = 'Creating user accounts'
+            importProgress = { current: 0, total: successful.length }
+            userIds = await runWithConcurrency(
+              successful,
+              8,
+              ({ row }) => createStudentUser(row.englishName),
+              (current, total) => (importProgress = { current, total })
+            )
           }
 
+          const linkRequests = successful
+            .map(({ result }, i) =>
+              userIds[i]
+                ? {
+                    method: 'PATCH',
+                    url: `/api/collections/student/records/${result.body.id}`,
+                    body: { user: userIds[i] },
+                  }
+                : null
+            )
+            .filter(Boolean)
+
+          if (linkRequests.length) {
+            importStage = 'Linking accounts'
+            importProgress = { current: 0, total: linkRequests.length }
+            await batchFetchChunked(linkRequests, 50, (current, total) => (importProgress = { current, total }))
+          }
+
+          importStage = 'Refreshing list'
           toast.success(
             [added && `${added} imported`, skipped && `${skipped} skipped`, failed && `${failed} failed`]
               .filter(Boolean)
@@ -665,6 +722,8 @@
           toast.error('CSV import failed')
         } finally {
           isProcessing = false
+          showImportModal = false
+          importStage = ''
           e.target.value = ''
         }
       },
@@ -783,20 +842,6 @@
     </div>
   </header>
 
-  {#if isProcessing && importProgress.total > 0}
-    <div class="space-y-1">
-      <div class="w-full bg-base-200 rounded-full h-2 overflow-hidden">
-        <div
-          class="bg-primary h-2 transition-all duration-300"
-          style="width: {Math.round((importProgress.current / importProgress.total) * 100)}%"
-        ></div>
-      </div>
-      <p class="text-xs text-base-content/60 text-right">
-        Importing {importProgress.current} / {importProgress.total}
-      </p>
-    </div>
-  {/if}
-
   <!-- Bulk action bar -->
   {#if selectedStudents.size > 0}
     <div class="card bg-base-100 border border-base-200 px-5 py-3">
@@ -900,6 +945,24 @@
     </section>
   {/if}
 </main>
+
+<!-- CSV Import Progress Modal -->
+{#if showImportModal}
+  <div class="modal modal-open bg-black/40">
+    <div class="modal-box max-w-sm border border-base-300 p-6 text-center">
+      <span class="loading loading-spinner loading-md text-primary mb-3"></span>
+      <h3 class="font-bold text-lg mb-1">Importing Students</h3>
+      <p class="text-sm text-base-content/60 mb-4">{importStage}…</p>
+      <div class="w-full bg-base-200 rounded-full h-3 overflow-hidden mb-2">
+        <div
+          class="bg-primary h-3 transition-all duration-300"
+          style="width: {importProgress.total ? Math.round((importProgress.current / importProgress.total) * 100) : 0}%"
+        ></div>
+      </div>
+      <p class="text-xs text-base-content/50">{importProgress.current} / {importProgress.total}</p>
+    </div>
+  </div>
+{/if}
 
 <!-- Add / Edit Modal -->
 {#if showModal}
