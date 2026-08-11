@@ -11,6 +11,25 @@
   // - Collection 'timeslot' with text fields 'start' / 'end' (e.g. "8:00", "8:50")
   // - Collection 'dailySchedule' with relation fields room/timeslot/teacher/student/subject
   //   and a single text datetime field 'date' (e.g. "2024-01-01 00:00:00")
+  //
+  // ─────────────────────────────────────────────
+  // CSV LAYOUT — TWO SECTIONS IN ONE FILE
+  // ─────────────────────────────────────────────
+  // 1) The main grid: one row per room, with Student Name/Subject/Teacher
+  //    triplets per session column. For a group/placeholder session, the
+  //    Student Name cell holds a label like "GROUP CLASS" or
+  //    "SPARTA STUDENTS (TOEIC)" instead of a real student.
+  // 2) A roster section further down the SAME file that re-lists real room
+  //    codes — this time as a multi-row block per room — with the actual
+  //    student name sitting in the exact same session column as the
+  //    matching "GROUP CLASS" cell above. That's where the real names for
+  //    a group session live.
+  //
+  // The boundary between the two sections is detected automatically: it's
+  // the first row whose room code (matched against your actual `roomType`
+  // records) has already been seen once before. Divider rows like
+  // "LUNCH TIME" / "BREAK TIME" never match a real room, so they don't
+  // trigger this.
   import { toast } from 'svelte-sonner'
   import { pb } from '../../../../lib/Pocketbase.svelte'
 
@@ -30,7 +49,16 @@
   // ─────────────────────────────────────────────
   // roomType: which roomType collection records to import into (e.g. "mtm", "grp")
   // defaultRoomFilter: regex pre-filled in the "Room filter" box for this page
-  let { onrefresh, selectedDate, roomType = 'mtm', defaultRoomFilter = '^(A|B|ST)\\d+$' } = $props()
+  // defaultSpecialNames: comma-separated list pre-filled in the "Group/placeholder
+  //   names" box — Student Name values that mean "look up the real roster below"
+  //   instead of "this text is a student's name"
+  let {
+    onrefresh,
+    selectedDate,
+    roomType = 'mtm',
+    defaultRoomFilter = '^(A|B|ST)\\d+$',
+    defaultSpecialNames = 'GROUP CLASS, SPARTA STUDENTS (TOEIC), SPARTA STUDENTS (ESL), SPARTA STUDENTS (IELTS), ━, SP CLASS',
+  } = $props()
 
   // ─────────────────────────────────────────────
   // State
@@ -40,6 +68,7 @@
   let csvFileName = $state('')
   let importDate = $state('') // single date — replaces startDate/endDate
   let roomFilterPattern = $state(defaultRoomFilter)
+  let specialStudentNames = $state(defaultSpecialNames)
   let isProcessing = $state(false)
   let processingLabel = $state('')
   let progress = $state(0)
@@ -54,6 +83,7 @@
     csvFileName = ''
     importDate = selectedDate || ''
     roomFilterPattern = defaultRoomFilter
+    specialStudentNames = defaultSpecialNames
     preview = null
     importResult = null
     progress = 0
@@ -210,6 +240,54 @@
   }
 
   /**
+   * Finds the row where the "one row per room" grid ends and the group-class
+   * roster section begins. The roster section re-uses real room codes as a
+   * multi-row block per room, so the first *recognized* room code we see for
+   * the second time marks the boundary. Rows whose room text isn't an actual
+   * roomType record (LUNCH TIME, BREAK TIME, section dividers, etc.) are
+   * ignored — they never trigger the boundary.
+   */
+  function findGridEndRow(rows, dataStartRow, roomCol, roomsByName) {
+    const seenRooms = new Set()
+    for (let r = dataStartRow; r < rows.length; r++) {
+      const raw = (rows[r]?.[roomCol] || '').trim()
+      if (!raw) continue
+      const key = normRoomCode(raw)
+      if (!roomsByName.has(key)) continue
+      if (seenRooms.has(key)) return r
+      seenRooms.add(key)
+    }
+    return rows.length // no roster section found
+  }
+
+  /**
+   * Builds a lookup of real student names from the roster section, keyed by
+   * room + the exact column the student cell sits in (so it lines up with
+   * the matching session column in the main grid above).
+   */
+  function buildRosterLookup(rows, gridEndRow, roomCol, sessions) {
+    const rosterByRoomAndCol = new Map() // `${roomKey}-${col}` -> [{ studentName, subject, teacher }]
+    for (let r = gridEndRow; r < rows.length; r++) {
+      const row = rows[r]
+      if (!row) continue
+      const roomKey = normRoomCode((row[roomCol] || '').trim())
+      if (!roomKey) continue
+      for (const sess of sessions) {
+        const studentName = (row[sess.col] || '').trim()
+        if (!studentName) continue
+        const key = `${roomKey}-${sess.col}`
+        if (!rosterByRoomAndCol.has(key)) rosterByRoomAndCol.set(key, [])
+        rosterByRoomAndCol.get(key).push({
+          studentName,
+          subject: (row[sess.col + 1] || '').trim(),
+          teacher: (row[sess.col + 2] || '').trim(),
+        })
+      }
+    }
+    return rosterByRoomAndCol
+  }
+
+  /**
    * Parses the CSV + cross-references your PocketBase data, but does NOT
    * write anything. Used for both the preview and as the first step of
    * the real import.
@@ -237,6 +315,18 @@
     const studentsByName = new Map(students.map((s) => [normName(s.englishName), s.id]))
     const subjectsByName = new Map(subjects.map((s) => [normName(s.name), s.id]))
 
+    // Names that mean "this cell isn't a real student — look up the actual
+    // students in the roster block further down the sheet instead."
+    const specialNames = new Set(
+      specialStudentNames
+        .split(',')
+        .map((n) => normName(n))
+        .filter(Boolean)
+    )
+
+    const gridEndRow = findGridEndRow(rows, dataStartRow, roomCol, roomsByName)
+    const rosterByRoomAndCol = buildRosterLookup(rows, gridEndRow, roomCol, sessions)
+
     const timeslotMatches = sessions.map((s) => {
       const match = timeslots.find(
         (t) => normTime(t.start) === normTime(s.start) && normTime(t.end) === normTime(s.end)
@@ -247,12 +337,15 @@
 
     const dateStr = `${importDate} 00:00:00`
 
-    // Conflict check: find any dailySchedule records already on this date
+    // Conflict check: find any dailySchedule records already on this date.
+    // Keyed by room+timeslot+student (not just room+timeslot), because a
+    // group-class room can legitimately hold many different students in the
+    // same room/timeslot at once.
     const existing = await pb.collection(COLLECTIONS.schedule).getFullList({
       filter: `date >= "${importDate} 00:00:00" && date <= "${importDate} 23:59:59"`,
-      fields: 'room,timeslot',
+      fields: 'room,timeslot,student',
     })
-    const existingSlotSet = new Set(existing.map((s) => `${s.room}-${s.timeslot}`))
+    const existingSlotSet = new Set(existing.map((s) => `${s.room}-${s.timeslot}-${s.student}`))
 
     const stats = {
       skippedExisting: 0,
@@ -261,6 +354,9 @@
       skippedNoTeacher: 0,
       skippedNoRoom: 0,
       skippedNoTimeslot: 0,
+      groupSessionsFound: 0, // main-grid cells matching a special/group name
+      groupSessionsUnresolved: 0, // ...that produced zero real students
+      groupStudentsCreated: 0, // real students pulled in from the roster
       missingStudents: new Set(),
       missingSubjects: new Set(),
       missingTeachers: new Set(),
@@ -273,7 +369,47 @@
     let matchedRoomRows = 0
     const sampleAllRoomCodes = new Set()
 
-    for (let r = dataStartRow; r < rows.length; r++) {
+    // Shared "resolve subject/teacher, check conflicts, push" used by both
+    // the plain-student path and the group-roster expansion path below.
+    // Returns true if a record was queued.
+    function tryAddRecord({ roomId, roomName, timeslotId, studentName, studentId, subjectName, teacherName }) {
+      const subjectId = subjectsByName.get(normName(subjectName))
+      if (!subjectId) {
+        stats.skippedNoSubject++
+        stats.missingSubjects.add(subjectName || '(blank)')
+        return false
+      }
+
+      let teacherId = teachersByName.get(normName(teacherName))
+      if (!teacherId) teacherId = roomDefaultTeacherId.get(normRoomCode(roomName)) || null
+      if (!teacherId) {
+        stats.skippedNoTeacher++
+        stats.missingTeachers.add(teacherName || '(blank)')
+        return false
+      }
+
+      const key = `${roomId}-${timeslotId}-${studentId}`
+      if (existingSlotSet.has(key) || plannedSlotSet.has(key)) {
+        stats.skippedExisting++
+        return false
+      }
+      plannedSlotSet.add(key)
+
+      toCreate.push({
+        room: roomId,
+        timeslot: timeslotId,
+        teacher: teacherId,
+        student: studentId,
+        subject: subjectId,
+        date: dateStr,
+        // small breadcrumbs kept only for the on-screen preview, stripped before create()
+        _roomName: roomName,
+        _studentName: studentName,
+      })
+      return true
+    }
+
+    for (let r = dataStartRow; r < gridEndRow; r++) {
       const row = rows[r]
       if (!row || row.length <= roomCol) continue
       const roomName = (row[roomCol] || '').trim()
@@ -304,6 +440,43 @@
         const subjectName = (row[sess.col + 1] || '').trim()
         const teacherName = (row[sess.col + 2] || '').trim()
 
+        if (specialNames.has(normName(studentName))) {
+          // Group/Sparta/placeholder cell — pull the real students from the
+          // roster block for this exact room + session column instead of
+          // treating "GROUP CLASS" etc. as a student name.
+          stats.groupSessionsFound++
+          const roster = rosterByRoomAndCol.get(`${normRoomCode(roomName)}-${sess.col}`) || []
+          let createdForThisCell = 0
+
+          for (const entry of roster) {
+            if (specialNames.has(normName(entry.studentName))) continue // still unresolved — no real name given below either
+
+            const studentId = studentsByName.get(normName(entry.studentName))
+            if (!studentId) {
+              stats.skippedNoStudent++
+              stats.missingStudents.add(entry.studentName)
+              continue
+            }
+
+            const added = tryAddRecord({
+              roomId,
+              roomName,
+              timeslotId: sess.timeslot.id,
+              studentName: entry.studentName,
+              studentId,
+              // prefer the roster row's own subject/teacher; fall back to the
+              // group cell's, in case the roster row left them blank
+              subjectName: entry.subject || subjectName,
+              teacherName: entry.teacher || teacherName,
+            })
+            if (added) createdForThisCell++
+          }
+
+          if (createdForThisCell === 0) stats.groupSessionsUnresolved++
+          stats.groupStudentsCreated += createdForThisCell
+          continue
+        }
+
         const studentId = studentsByName.get(normName(studentName))
         if (!studentId) {
           stats.skippedNoStudent++
@@ -311,38 +484,14 @@
           continue
         }
 
-        const subjectId = subjectsByName.get(normName(subjectName))
-        if (!subjectId) {
-          stats.skippedNoSubject++
-          stats.missingSubjects.add(subjectName || '(blank)')
-          continue
-        }
-
-        let teacherId = teachersByName.get(normName(teacherName))
-        if (!teacherId) teacherId = roomDefaultTeacherId.get(normRoomCode(roomName)) || null
-        if (!teacherId) {
-          stats.skippedNoTeacher++
-          stats.missingTeachers.add(teacherName || '(blank)')
-          continue
-        }
-
-        const key = `${roomId}-${sess.timeslot.id}`
-        if (existingSlotSet.has(key) || plannedSlotSet.has(key)) {
-          stats.skippedExisting++
-          continue
-        }
-        plannedSlotSet.add(key)
-
-        toCreate.push({
-          room: roomId,
-          timeslot: sess.timeslot.id,
-          teacher: teacherId,
-          student: studentId,
-          subject: subjectId,
-          date: dateStr,
-          // small breadcrumbs kept only for the on-screen preview, stripped before create()
-          _roomName: roomName,
-          _studentName: studentName,
+        tryAddRecord({
+          roomId,
+          roomName,
+          timeslotId: sess.timeslot.id,
+          studentName,
+          studentId,
+          subjectName,
+          teacherName,
         })
       }
     }
@@ -431,7 +580,8 @@
     <p class="text-xs text-neutral-500 mb-4">
       Reads a room/session grid CSV (room rows × time-slot columns). Skips any cell with no student name, any cell whose
       room/timeslot already has a schedule on the chosen date, and any name it can't match against your Teacher /
-      Student / Subject records.
+      Student / Subject records. Cells matching a "group/placeholder name" below are expanded using the roster block
+      elsewhere in the same file instead of being skipped.
     </p>
 
     {#if !preview && !importResult}
@@ -472,6 +622,24 @@
             disabled={isProcessing}
           />
           <span class="text-xs text-neutral-500">Edit if this CSV uses different room codes.</span>
+        </div>
+
+        <div>
+          <label class="label" for="import-special-names">
+            <span class="label-text">Group/placeholder names (comma-separated)</span>
+          </label>
+          <textarea
+            id="import-special-names"
+            class="textarea textarea-bordered textarea-sm w-full font-mono"
+            rows="2"
+            bind:value={specialStudentNames}
+            disabled={isProcessing}
+          ></textarea>
+          <span class="text-xs text-neutral-500">
+            When a session's Student Name cell exactly matches one of these, the importer looks for the real students in
+            the roster block further down the sheet (same room, same session column) instead of treating this text as a
+            student name.
+          </span>
         </div>
       </div>
 
@@ -517,6 +685,13 @@
             <div class="stat-value text-success text-2xl">{preview.toCreate.length}</div>
           </div>
           <div class="stat py-2">
+            <div class="stat-title text-xs">From group cells</div>
+            <div class="stat-value text-xs">
+              {preview.stats.groupStudentsCreated} student{preview.stats.groupStudentsCreated === 1 ? '' : 's'} / {preview
+                .stats.groupSessionsFound} cell{preview.stats.groupSessionsFound === 1 ? '' : 's'}
+            </div>
+          </div>
+          <div class="stat py-2">
             <div class="stat-title text-xs">Already scheduled</div>
             <div class="stat-value text-xs">{preview.stats.skippedExisting}</div>
           </div>
@@ -526,11 +701,15 @@
           </div>
         </div>
 
-        {#if preview.stats.skippedNoSubject || preview.stats.skippedNoTeacher || preview.stats.skippedNoRoom || preview.unmatchedSessionCount}
+        {#if preview.stats.skippedNoSubject || preview.stats.skippedNoTeacher || preview.stats.skippedNoRoom || preview.stats.groupSessionsUnresolved || preview.unmatchedSessionCount}
           <div class="alert alert-warning text-xs py-2">
             <span>
               {#if preview.unmatchedSessionCount}
                 {preview.unmatchedSessionCount} time column(s) in the CSV had no matching timeslot record.
+              {/if}
+              {#if preview.stats.groupSessionsUnresolved}
+                {preview.stats.groupSessionsUnresolved} group cell(s) had no usable roster entries below them (nothing to
+                import for those).
               {/if}
               {#if preview.stats.skippedNoRoom}
                 {preview.stats.skippedNoRoom} cell(s) skipped — room not found: {listPreview(
