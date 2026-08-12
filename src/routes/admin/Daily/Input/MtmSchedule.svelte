@@ -239,14 +239,12 @@
       [
         h('div', { class: 'font-bold text-neutral-900 border-b border-neutral-500 mb-1 pb-1 w-full' }, [
           h('div', {}, subjectName),
-          h('div', { class: 'text-[10px] uppercase mt-1' }, teacherName),
+          h('div', { class: 'text-xs uppercase mt-1' }, teacherName),
         ]),
         h(
           'div',
           { class: 'flex flex-wrap justify-center gap-1' },
-          allStudents.map((name) =>
-            h('span', { class: 'badge badge-ghost font-semibold badge-xs whitespace-nowrap' }, name)
-          )
+          allStudents.map((name) => h('span', { class: 'text-xs font-semibold whitespace-nowrap' }, name))
         ),
         h('div', { class: 'flex justify-start w-full mt-1 gap-1 flex-wrap' }, [
           h('span', { class: `badge badge-xs ${statusClass}` }, status),

@@ -169,7 +169,6 @@
     const roomName = first.roomName || 'No Room'
     const allStudents = schedules.flatMap((s) => s.students.map((std) => std.name))
     const hasSub = !!first.sub
-    const isGrp = /^[GH]/i.test(roomName)
 
     // Same tag used to build makeupCountMap/makeupCount in loadSchedules —
     // reused here so the cell-level dot always matches the header badge.
@@ -198,13 +197,7 @@
         h(
           'div',
           { class: 'flex flex-wrap justify-center gap-1' },
-          allStudents.map((name, i) =>
-            h(
-              'span',
-              { class: 'text-xs font-semibold whitespace-nowrap' },
-              isGrp && i < allStudents.length - 1 ? `${name},` : name
-            )
-          )
+          allStudents.map((name) => h('span', { class: 'text-xs font-semibold badge-xs whitespace-nowrap' }, name))
         ),
         hasSub
           ? h('div', { class: 'flex items-center justify-center gap-1 mt-1' }, [
@@ -620,6 +613,12 @@
     scrollbar-gutter: stable;
   }
 
+  /* Hover highlight on schedule cells */
+  #sub-grid :global(.gridjs-table td:hover > div) {
+    background-color: #d1fae5 !important;
+    transition: background-color 0.2s ease;
+  }
+
   /* Scrollable grid wrapper */
   #sub-grid :global(.gridjs-wrapper) {
     max-height: calc(100vh - 220px);
@@ -635,37 +634,27 @@
     position: relative;
   }
 
-  /* Sticky header row */
+  /* Sticky header row — sits above every sticky column */
   #sub-grid :global(th) {
     position: sticky;
     top: 0;
-    z-index: 20;
+    z-index: 25;
     background-color: #535252;
     color: #ffffff;
   }
 
   /* Sticky "Teacher" column */
-  #sub-grid :global(th:nth-child(1)),
   #sub-grid :global(td:nth-child(1)) {
     position: sticky;
     left: 0;
     z-index: 15;
   }
 
-  #sub-grid :global(th:nth-child(1)) {
-    z-index: 25;
-  }
-
   /* Sticky "Room" column */
-  #sub-grid :global(th:nth-child(2)),
   #sub-grid :global(td:nth-child(2)) {
     position: sticky;
     left: 150px;
     z-index: 10;
-  }
-
-  #sub-grid :global(th:nth-child(2)) {
-    z-index: 25;
   }
 
   /* Bold font for teacher and room sticky cols */

@@ -264,9 +264,7 @@
       h(
         'div',
         { class: 'flex flex-wrap justify-center gap-1 flex-1' },
-        allStudents.map((name) =>
-          h('span', { class: 'badge badge-ghost font-semibold badge-xs whitespace-nowrap' }, name)
-        )
+        allStudents.map((name) => h('span', { class: 'text-xs font-semibold badge-xs whitespace-nowrap' }, name))
       ),
       h('div', { class: 'flex justify-start w-full mt-1 gap-1 flex-wrap' }, [
         h('span', { class: `badge badge-xs ${statusClass}` }, status),
