@@ -617,6 +617,7 @@
   #sub-grid :global(.gridjs-table td:hover > div) {
     background-color: #d1fae5 !important;
     transition: background-color 0.2s ease;
+    cursor: pointer;
   }
 
   /* Scrollable grid wrapper */
@@ -627,44 +628,54 @@
     will-change: scroll-position;
   }
 
-  /* Zero out padding on td so background divs fill the full cell */
+  /* Let cell background divs fill the full td area */
   #sub-grid :global(td) {
     padding: 0 !important;
     vertical-align: stretch;
     position: relative;
   }
 
-  /* Sticky header row — sits above every sticky column */
+  /* Sticky header row */
   #sub-grid :global(th) {
     position: sticky;
     top: 0;
-    z-index: 25;
+    z-index: 20;
     background-color: #535252;
     color: #ffffff;
   }
 
   /* Sticky "Teacher" column */
+  #sub-grid :global(th:nth-child(1)),
   #sub-grid :global(td:nth-child(1)) {
     position: sticky;
     left: 0;
     z-index: 15;
   }
 
+  #sub-grid :global(th:nth-child(1)) {
+    z-index: 25;
+  }
+
   /* Sticky "Room" column */
+  #sub-grid :global(th:nth-child(2)),
   #sub-grid :global(td:nth-child(2)) {
     position: sticky;
     left: 150px;
     z-index: 10;
   }
 
-  /* Bold font for teacher and room sticky cols */
+  #sub-grid :global(th:nth-child(2)) {
+    z-index: 25;
+  }
+
+  /* font bold for teacher and room td */
   #sub-grid :global(td:nth-child(1) div),
   #sub-grid :global(td:nth-child(2) div) {
     font-size: 0.85rem;
     font-weight: bold;
   }
 
-  /* Stronger table borders */
+  /* stronger table border */
   #sub-grid :global(.gridjs-table td),
   #sub-grid :global(.gridjs-table th) {
     outline: 1px solid #535252;

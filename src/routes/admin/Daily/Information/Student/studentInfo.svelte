@@ -111,6 +111,10 @@
   const getId = (rel) => (!rel ? null : Array.isArray(rel) ? rel[0] : typeof rel === 'object' ? rel.id : rel)
   const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 
+  // ── ADDED: active (non-graduated) name-collision helper, shared by the
+  // single-add, bulk-add, and CSV-import duplicate checks below ─────────────
+  const isActiveNameMatch = (s, name) => s.englishName?.toLowerCase() === name.toLowerCase() && s.status !== 'graduated'
+
   function parseDateToISO(str) {
     if (!str) return null
     const match = str.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
@@ -165,22 +169,6 @@
     return results
   }
 
-  // ── ADDED: get friday of the date range helper ─────────────────────────────────────────────
-
-  //   function getFridayOfWeek(dateStr) {
-  //     const d = new Date(dateStr + 'T00:00:00')
-  //     const dow = d.getDay() // 0=Sun..6=Sat
-  //     const monday = new Date(d)
-  //     monday.setDate(d.getDate() + (dow === 0 ? 1 : 1 - dow))
-  //     const friday = new Date(monday)
-  //     friday.setDate(monday.getDate() + 4)
-
-  //     const y = friday.getFullYear()
-  //     const m = String(friday.getMonth() + 1).padStart(2, '0')
-  //     const day = String(friday.getDate()).padStart(2, '0')
-  //     return `${y}-${m}-${day}`
-  //   }
-
   function getScheduleEndDate(student) {
     if (!student?.end) return null
     const d = new Date(student.end)
@@ -195,16 +183,23 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   }
 
-  // ── ADDED: User account helper ─────────────────────────────────────────────
+  // ── UPDATED: User account helper ────────────────────────────────────────────
+  // Only reuse an existing account when a CURRENTLY ACTIVE (non-graduated)
+  // student already owns it under this exact English name — that's the one
+  // legitimate "same person" case. A graduated student sharing the same name
+  // is treated as a different person and always gets a brand-new account, so
+  // two people never end up sharing one login. Uniqueness then falls through
+  // to the username-suffix loop below (e.g. JOHNDOE → JOHNDOE1).
   async function createStudentUser(englishName) {
     const trimmedName = englishName.trim()
 
-    // Check if a user already exists for this student name
     try {
-      const existing = await pb.collection('users').getFirstListItem(`firstName="${trimmedName}"`)
-      return existing.id
+      const activeOwner = await pb
+        .collection('student')
+        .getFirstListItem(`englishName="${trimmedName}" && status != "graduated" && user != ""`)
+      if (activeOwner.user) return getId(activeOwner.user)
     } catch {
-      // not found, continue to create
+      // no active student owns an account under this name — fall through and create one
     }
 
     const base = trimmedName.toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -344,11 +339,16 @@
 
       const toPromote = records.filter((s) => s.status === 'new' && s.start && new Date(s.start) < cutoff)
       const toGraduate = records.filter((s) => s.end && new Date(s.end) < today && s.status !== 'graduated')
+      // ── ADDED: un-graduate if the end date has since been moved into the future
+      const toUngraduate = records.filter((s) => s.status === 'graduated' && s.end && new Date(s.end) >= today)
 
-      if (toPromote.length || toGraduate.length) {
+      if (toPromote.length || toGraduate.length || toUngraduate.length) {
         await Promise.allSettled([
           ...toPromote.map(({ id }) => pb.collection('student').update(id, { status: 'old' })),
           ...toGraduate.map(({ id }) => pb.collection('student').update(id, { status: 'graduated' })),
+          ...toUngraduate.map(({ id, start }) =>
+            pb.collection('student').update(id, { status: start && new Date(start) < cutoff ? 'old' : 'new' })
+          ),
         ])
         records = await pb.collection('student').getFullList({ sort: '-studentId' })
       }
@@ -403,8 +403,13 @@
         })
         toast.success('New record created with extended course and dates')
       } else {
-        if (!formData.id && students.some((s) => s.englishName?.toUpperCase() === trimmed.toUpperCase()))
-          return toast.error(`"${trimmed}" already exists`)
+        // ── UPDATED: only block on a name collision with a still-ACTIVE
+        // student. A name matching only a graduated student is allowed
+        // through — createStudentUser() will give it its own fresh account. ──
+        if (!formData.id) {
+          const dupe = students.find((s) => isActiveNameMatch(s, trimmed))
+          if (dupe) return toast.error(`"${trimmed}" already exists`)
+        }
         const nextId = !formData.id ? await getNextStudentId() : null
         const payload = {
           ...(nextId !== null && { studentId: padId(nextId) }),
@@ -482,7 +487,10 @@
     if (!bulkPreview.length) return toast.error('No names entered')
 
     isProcessing = true
-    const existingNames = new Set(students.map((s) => s.englishName?.toLowerCase()))
+    // ── UPDATED: only names held by ACTIVE students count as "existing" ──
+    const existingNames = new Set(
+      students.filter((s) => s.status !== 'graduated').map((s) => s.englishName?.toLowerCase())
+    )
     const toCreate = bulkPreview.filter((row) => !existingNames.has(row.englishName.toLowerCase()))
     const skipped = bulkPreview.length - toCreate.length
 
@@ -644,7 +652,10 @@
 
         if (!rows.length) return toast.error('No valid rows found in CSV')
 
-        const existingNames = new Set(students.map((s) => s.englishName?.toLowerCase()))
+        // ── UPDATED: only names held by ACTIVE students count as "existing" ──
+        const existingNames = new Set(
+          students.filter((s) => s.status !== 'graduated').map((s) => s.englishName?.toLowerCase())
+        )
         const toCreate = rows.filter((r) => !existingNames.has(r.englishName.toLowerCase()))
         const skipped = rows.length - toCreate.length
 
@@ -1257,7 +1268,9 @@
               </thead>
               <tbody>
                 {#each bulkPreview as row}
-                  {@const isDupe = students.some((s) => s.englishName?.toLowerCase() === row.englishName.toLowerCase())}
+                  <!-- ── UPDATED: only flag as duplicate if an ACTIVE student
+                  holds this name — a graduated match is allowed through ── -->
+                  {@const isDupe = students.some((s) => isActiveNameMatch(s, row.englishName))}
                   <tr class={isDupe ? 'opacity-40' : ''}>
                     <td class="text-base-content/70">{row.name || '—'}</td>
                     <td class={isDupe ? 'line-through' : 'font-medium'}>{row.englishName}</td>
@@ -1292,7 +1305,7 @@
             <span class="loading loading-spinner loading-sm"></span>
           {:else}
             {@const toAdd = bulkPreview.filter(
-              (row) => !students.some((s) => s.englishName?.toLowerCase() === row.englishName.toLowerCase())
+              (row) => !students.some((s) => isActiveNameMatch(s, row.englishName))
             ).length}
             Add {toAdd} Student{toAdd !== 1 ? 's' : ''}
           {/if}
