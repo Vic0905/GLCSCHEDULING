@@ -42,7 +42,22 @@
     schedule: 'dailySchedule',
   }
 
-  const CREATE_BATCH_SIZE = 8
+  const CREATE_BATCH_SIZE = 5000
+
+  async function batchFetch(requests) {
+    const base = pb.baseUrl.replace(/\/+$/, '')
+    const res = await fetch(`${base}/api/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pb.authStore.token}`,
+      },
+      body: JSON.stringify({ requests }),
+    })
+    const text = await res.text()
+    if (!res.ok) throw new Error(text)
+    return JSON.parse(text)
+  }
 
   // ─────────────────────────────────────────────
   // Props
@@ -57,7 +72,7 @@
     selectedDate,
     roomType = 'mtm',
     defaultRoomFilter = '^(A|B|ST)\\d+$',
-    defaultSpecialNames = 'GROUP CLASS, SPARTA STUDENTS (TOEIC), SPARTA STUDENTS (ESL), SPARTA STUDENTS (IELTS), ━, SP CLASS',
+    defaultSpecialNames = 'GROUP CLASS, SPARTA STUDENTS (TOEIC), SPARTA STUDENTS (ESL), SPARTA STUDENTS (IELTS), ━, SP CLASS, NAKAMURA STUDENTS',
   } = $props()
 
   // ─────────────────────────────────────────────
@@ -534,24 +549,37 @@
     const records = preview.toCreate
 
     for (let i = 0; i < records.length; i += CREATE_BATCH_SIZE) {
-      const batch = records.slice(i, i + CREATE_BATCH_SIZE)
-      const settled = await Promise.allSettled(
-        batch.map(({ _roomName, _studentName, ...rec }) =>
-          pb.collection(COLLECTIONS.schedule).create({ ...rec, status: 'draft' })
+      const chunk = records.slice(i, i + CREATE_BATCH_SIZE)
+
+      try {
+        await batchFetch(
+          chunk.map(({ _roomName, _studentName, ...rec }) => ({
+            method: 'POST',
+            url: `/api/collections/${COLLECTIONS.schedule}/records`,
+            body: { ...rec, status: 'draft' },
+          }))
         )
-      )
-      settled.forEach((res, idx) => {
-        if (res.status === 'fulfilled') {
-          result.created++
-        } else {
-          result.errors.push({
-            room: batch[idx]._roomName,
-            student: batch[idx]._studentName,
-            error: res.reason?.message || String(res.reason),
-          })
-        }
-      })
-      progress = Math.round(((i + batch.length) / records.length) * 100)
+        result.created += chunk.length
+      } catch {
+        const settled = await Promise.allSettled(
+          chunk.map(({ _roomName, _studentName, ...rec }) =>
+            pb.collection(COLLECTIONS.schedule).create({ ...rec, status: 'draft' })
+          )
+        )
+        settled.forEach((res, idx) => {
+          if (res.status === 'fulfilled') {
+            result.created++
+          } else {
+            result.errors.push({
+              room: chunk[idx]._roomName,
+              student: chunk[idx]._studentName,
+              error: res.reason?.message || String(res.reason),
+            })
+          }
+        })
+      }
+
+      progress = Math.round(((i + chunk.length) / records.length) * 100)
     }
 
     isProcessing = false
