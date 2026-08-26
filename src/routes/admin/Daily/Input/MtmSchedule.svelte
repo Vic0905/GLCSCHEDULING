@@ -89,10 +89,12 @@
     annex2: {
       prefix: 'B',
       bandColor: 'bg-white text-neutral-800',
-      baseColor: 'bg-neutral-200/90 text-neutral-800',
+      baseColor: 'bg-neutral-300 text-neutral-800',
       bands: [
-        [1, 10],
-        [30, 50],
+        [1, 7],
+        [22, 35],
+        [50, 63],
+        [78, 91],
       ],
     },
   }

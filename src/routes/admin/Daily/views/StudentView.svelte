@@ -119,7 +119,7 @@
     return h(
       'div',
       {
-        class: `flex flex-col gap-1 p-2 items-center justify-center text-center w-full h-full${bgClass}`,
+        class: `flex flex-col gap-1 p-2 items-center justify-center text-center w-full h-full ${bgClass}`,
       },
       items.map((item) =>
         h(
