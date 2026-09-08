@@ -1,57 +1,111 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import { toast } from 'svelte-sonner'
   import { pb } from '../../../../lib/Pocketbase.svelte'
 
   const BREAK_SCHEDULES = ['lunch break', 'break time', 'other task']
+
+  // Single source of truth for every room category: which name prefix it
+  // matches, its section label/styling, whether it renders as an "aisle"
+  // grid (with sub-ranges) or a "loose" flat list, and its aisle ranges
+  // if applicable. Add/edit a building or aisle range here only.
+  const CATEGORY_DEFS = [
+    {
+      key: 'mainMtm',
+      prefix: 'A',
+      label: 'MAIN BUILDING MTM',
+      headerClass: 'font-black text-lg text-primary mb-6',
+      layout: 'aisle',
+      ranges: [
+        { label: 'A001-A005', min: 1, max: 5 },
+        { label: 'A006-A018', min: 6, max: 18 },
+        { label: 'A019-A033', min: 19, max: 33 },
+        { label: 'A034-A049', min: 34, max: 49 },
+        { label: 'A050-A064', min: 50, max: 64 },
+        { label: 'A065-A073', min: 65, max: 73 },
+        { label: 'A074-A083', min: 74, max: 83 },
+        { label: 'A084-A092', min: 84, max: 92 },
+        { label: 'A093-A101', min: 93, max: 101 },
+        { label: 'A102-A109', min: 102, max: 109 },
+        { label: 'A110-A125', min: 110, max: 125 },
+        { label: 'A126-A141', min: 126, max: 141 },
+        { label: 'A142-A157', min: 142, max: 157 },
+      ],
+    },
+    {
+      key: 'stRooms',
+      prefix: 'ST',
+      label: 'ST Rooms',
+      headerClass: 'font-bold text-sm opacity-50 mb-4',
+      layout: 'loose',
+    },
+    {
+      key: 'mainGrp',
+      prefix: 'G',
+      label: 'MAIN BUILDING GRP',
+      headerClass: 'font-black text-lg text-secondary mb-6',
+      layout: 'aisle',
+      ranges: [
+        { label: 'G01-G11', min: 1, max: 11 },
+        { label: 'G12-G18', min: 12, max: 18 },
+        { label: 'G19-G34', min: 19, max: 34 },
+      ],
+    },
+    {
+      key: 'annex2',
+      prefix: 'B',
+      label: 'ANNEX 2 BUILDING MTM',
+      headerClass: 'font-black text-lg text-accent mb-6',
+      layout: 'aisle',
+      ranges: [
+        { label: 'B01-B07', min: 1, max: 7 },
+        { label: 'B08-B21', min: 8, max: 21 },
+        { label: 'B22-B35', min: 22, max: 35 },
+        { label: 'B36-B49', min: 36, max: 49 },
+        { label: 'B50-B63', min: 50, max: 63 },
+        { label: 'B64-B77', min: 64, max: 77 },
+        { label: 'B78-B91', min: 78, max: 91 },
+        { label: 'B92-B98', min: 92, max: 98 },
+      ],
+    },
+    {
+      key: 'annex2Grp',
+      prefix: 'H',
+      label: 'ANNEX 2 BUILDING GRP',
+      headerClass: 'font-black text-lg text-accent mb-6',
+      layout: 'aisle',
+      ranges: [
+        { label: 'H01-H10', min: 1, max: 10 },
+        { label: 'H11-H16', min: 11, max: 16 },
+      ],
+    },
+    {
+      // Catch-all: no prefix, so categorizeRoom() only lands here when
+      // nothing else matched (unknown prefix, or a number outside every
+      // range above).
+      key: 'other',
+      label: 'Other Rooms',
+      headerClass: 'font-bold text-sm opacity-50 mb-4',
+      layout: 'loose',
+    },
+  ]
 
   let selectedDate = $state(getTodayDate())
   let selectedTimeslotId = $state(null)
   let timeslots = $state([])
   let allRooms = $state([])
   let rawRecords = $state([])
+  let rawAttendance = $state([])
   let isLoading = $state(false)
 
-  let cachedTimeslots = []
-  let cachedRooms = []
+  // One collapse flag per category, derived from CATEGORY_DEFS so adding a
+  // new category automatically gets a toggle without touching this line.
+  let collapsedSections = $state(Object.fromEntries(CATEGORY_DEFS.map((c) => [c.key, false])))
 
-  const A_RANGES = [
-    { label: 'A001-A005', min: 1, max: 5 },
-    { label: 'A006-A018', min: 6, max: 18 },
-    { label: 'A019-A033', min: 19, max: 33 },
-    { label: 'A034-A049', min: 34, max: 49 },
-    { label: 'A050-A064', min: 50, max: 64 },
-    { label: 'A065-A073', min: 65, max: 73 },
-    { label: 'A074-A083', min: 74, max: 83 },
-    { label: 'A084-A092', min: 84, max: 92 },
-    { label: 'A093-A101', min: 93, max: 101 },
-    { label: 'A102-A109', min: 102, max: 109 },
-    { label: 'A110-A125', min: 110, max: 125 },
-    { label: 'A126-A141', min: 126, max: 141 },
-    { label: 'A142-A157', min: 142, max: 157 },
-  ]
+  let cache = { timeslots: [], rooms: [] }
+  let unsubAttendance = null
 
-  const G_RANGES = [
-    { label: 'G01-G11', min: 1, max: 11 },
-    { label: 'G12-G18', min: 12, max: 18 },
-    { label: 'G19-G34', min: 19, max: 34 },
-  ]
-
-  const B_RANGES = [
-    { label: 'B01-B07', min: 1, max: 7 },
-    { label: 'B08-B21', min: 8, max: 21 },
-    { label: 'B22-B35', min: 22, max: 35 },
-    { label: 'B36-B49', min: 36, max: 49 },
-    { label: 'B50-B63', min: 50, max: 63 },
-    { label: 'B64-B77', min: 64, max: 77 },
-    { label: 'B78-B91', min: 78, max: 91 },
-    { label: 'B92-B98', min: 92, max: 98 },
-  ]
-
-  const H_RANGES = [
-    { label: 'H01-H10', min: 1, max: 10 },
-    { label: 'H11-H16', min: 11, max: 16 },
-  ]
+  let currentTeacherId = $derived(pb.authStore.model?.id ?? null)
 
   function getTodayDate() {
     return new Date().toISOString().split('T')[0]
@@ -68,21 +122,13 @@
     return d.toISOString().split('T')[0]
   }
 
-  function getRoomSortKey(roomName) {
-    if (!roomName) return { tier: 99, num: Infinity }
-    const upper = roomName.toUpperCase()
-    let tier
-    if (upper.startsWith('ST')) tier = 1
-    else if (upper.startsWith('A')) tier = 0
-    else if (upper.startsWith('B')) tier = 2
-    else if (upper.startsWith('G') || upper.startsWith('H')) tier = 3
-    else tier = 4
-    const num = parseInt(upper.replace(/\D/g, ''), 10)
-    return { tier, num: isNaN(num) ? Infinity : num }
+  function getRoomNum(roomName) {
+    const num = parseInt((roomName || '').replace(/\D/g, ''), 10)
+    return isNaN(num) ? Infinity : num
   }
 
   function byRoomNum(a, b) {
-    return getRoomSortKey(a.room?.name).num - getRoomSortKey(b.room?.name).num
+    return getRoomNum(a.room?.name) - getRoomNum(b.room?.name)
   }
 
   function getBreakInfo(group) {
@@ -93,6 +139,26 @@
     const nowStr = new Date().toTimeString().slice(0, 5)
     const match = timeslotList.find((t) => nowStr >= t.start && nowStr < t.end)
     return match?.id || null
+  }
+
+  function toggleSection(key) {
+    collapsedSections[key] = !collapsedSections[key]
+  }
+
+  function attendanceKey(teacherId, roomId, timeslotId) {
+    return `${teacherId}-${roomId}-${timeslotId}`
+  }
+
+  // Decides which category (and, for aisle layouts, which sub-range) a
+  // room belongs to. Replaces the old startsWith/isNaN if-elif chain.
+  function categorizeRoom(roomName) {
+    const upper = (roomName || '').toUpperCase()
+    const num = getRoomNum(upper)
+    const cat = CATEGORY_DEFS.find((c) => c.prefix && upper.startsWith(c.prefix))
+    if (!cat) return { key: 'other' }
+    if (!cat.ranges) return { key: cat.key }
+    const range = cat.ranges.find((r) => num >= r.min && num <= r.max)
+    return range ? { key: cat.key, rangeLabel: range.label } : { key: 'other' }
   }
 
   // Raw scheduled records for the selected timeslot, grouped by teacher+room
@@ -126,17 +192,22 @@
     return [...map.values()]
   })
 
-  // Every enabled room, bucketed into its aisle/section, each carrying
-  // whatever scheduled groups (if any) matched it for this timeslot.
-  let categorizedSchedules = $derived.by(() => {
-    const mainMtm = A_RANGES.map((r) => ({ ...r, rooms: [] }))
-    const mainGrp = G_RANGES.map((r) => ({ ...r, rooms: [] }))
-    const annex2 = B_RANGES.map((r) => ({ ...r, rooms: [] }))
-    const annex2Grp = H_RANGES.map((r) => ({ ...r, rooms: [] })) // NEW
-    const stRooms = []
-    const other = []
+  // Attendance lookup keyed by teacher-room-timeslot for the selected date
+  let attendanceMap = $derived.by(() => {
+    const map = new Map()
+    for (const a of rawAttendance) {
+      map.set(attendanceKey(a.teacher, a.room, a.timeslot), a)
+    }
+    return map
+  })
 
-    const getNum = (name) => parseInt(name.replace(/\D/g, ''), 10)
+  // Every enabled room, bucketed by CATEGORY_DEFS (into aisle sub-ranges
+  // where applicable), each carrying whatever scheduled groups matched it.
+  let categorizedSchedules = $derived.by(() => {
+    const buckets = {}
+    for (const cat of CATEGORY_DEFS) {
+      buckets[cat.key] = cat.ranges ? cat.ranges.map((r) => ({ ...r, rooms: [] })) : []
+    }
 
     const groupsByRoom = new Map()
     for (const group of groupedSchedules) {
@@ -146,70 +217,50 @@
     }
 
     for (const room of allRooms) {
-      const roomName = room.name?.toUpperCase() || ''
-      const num = getNum(roomName)
       const entry = { room, groups: groupsByRoom.get(room.id) || [] }
-
-      if (roomName.startsWith('A') && !isNaN(num)) {
-        const aisle = mainMtm.find((a) => num >= a.min && num <= a.max)
-        if (aisle) aisle.rooms.push(entry)
-        else other.push(entry)
-      } else if (roomName.startsWith('G') && !isNaN(num)) {
-        const aisle = mainGrp.find((a) => num >= a.min && num <= a.max)
-        if (aisle) aisle.rooms.push(entry)
-        else other.push(entry)
-      } else if (roomName.startsWith('B') && !isNaN(num)) {
-        const aisle = annex2.find((a) => num >= a.min && num <= a.max)
-        if (aisle) aisle.rooms.push(entry)
-        else other.push(entry)
-      } else if (roomName.startsWith('H') && !isNaN(num)) {
-        // NEW
-        const aisle = annex2Grp.find((a) => num >= a.min && num <= a.max)
-        if (aisle) aisle.rooms.push(entry)
-        else other.push(entry)
-      } else if (roomName.startsWith('ST')) {
-        stRooms.push(entry)
+      const { key, rangeLabel } = categorizeRoom(room.name)
+      if (rangeLabel) {
+        buckets[key].find((a) => a.label === rangeLabel).rooms.push(entry)
       } else {
-        other.push(entry)
+        buckets[key].push(entry)
       }
     }
 
-    mainMtm.forEach((a) => a.rooms.sort(byRoomNum))
-    mainGrp.forEach((a) => a.rooms.sort(byRoomNum))
-    annex2.forEach((a) => a.rooms.sort(byRoomNum))
-    annex2Grp.forEach((a) => a.rooms.sort(byRoomNum)) // NEW
-    stRooms.sort(byRoomNum)
-    other.sort(byRoomNum)
+    for (const cat of CATEGORY_DEFS) {
+      if (cat.ranges) buckets[cat.key].forEach((a) => a.rooms.sort(byRoomNum))
+      else buckets[cat.key].sort(byRoomNum)
+    }
 
-    return { mainMtm, mainGrp, annex2, annex2Grp, stRooms, other } // annex2Grp added
+    return buckets
   })
+
+  async function getCached(key, fetcher) {
+    if (!cache[key].length) cache[key] = await fetcher()
+    return cache[key]
+  }
 
   async function loadSchedules() {
     isLoading = true
     try {
       const date = selectedDate
-      const [timeslotList, roomList, records] = await Promise.all([
-        cachedTimeslots.length
-          ? Promise.resolve(cachedTimeslots)
-          : pb.collection('timeslot').getFullList({ sort: 'start' }),
-        cachedRooms.length
-          ? Promise.resolve(cachedRooms)
-          : pb.collection('roomType').getFullList({
-              filter: 'status = "enabled"',
-              sort: 'name',
-              expand: 'teacher',
-            }),
+      const [timeslotList, roomList, records, attendance] = await Promise.all([
+        getCached('timeslots', () => pb.collection('timeslot').getFullList({ sort: 'start' })),
+        getCached('rooms', () =>
+          pb.collection('roomType').getFullList({ filter: 'status = "enabled"', sort: 'name', expand: 'teacher' })
+        ),
         pb.collection('dailySchedule').getFullList({
           filter: `date >= "${date} 00:00:00" && date <= "${date} 23:59:59"`,
           expand: 'teacher,student,subject,room,timeslot,customSchedule,sub',
         }),
+        pb.collection('teacherAttendance').getFullList({
+          filter: `date = "${date}"`,
+        }),
       ])
 
-      if (!cachedTimeslots.length) cachedTimeslots = timeslotList
-      if (!cachedRooms.length) cachedRooms = roomList
       timeslots = timeslotList
       allRooms = roomList
       rawRecords = records
+      rawAttendance = attendance
 
       if (!selectedTimeslotId || !timeslots.some((t) => t.id === selectedTimeslotId)) {
         const autoId = date === getTodayDate() ? getCurrentTimeslotId(timeslots) : null
@@ -220,6 +271,52 @@
       toast.error('Failed to load schedule')
     } finally {
       isLoading = false
+    }
+  }
+
+  // Applies a single realtime SSE event ({ action, record }) to local state
+  // without refetching everything. Ignores events for a date other than
+  // the one currently on screen.
+  function applyAttendanceEvent({ action, record }) {
+    if (record.date !== selectedDate) return
+
+    if (action === 'create' || action === 'update') {
+      const idx = rawAttendance.findIndex((a) => a.id === record.id)
+      if (idx === -1) {
+        rawAttendance = [...rawAttendance, record]
+      } else {
+        rawAttendance = rawAttendance.map((a) => (a.id === record.id ? record : a))
+      }
+    } else if (action === 'delete') {
+      rawAttendance = rawAttendance.filter((a) => a.id !== record.id)
+    }
+  }
+
+  async function toggleCheckIn(group) {
+    const effectiveTeacherId = group.sub?.id || group.teacher?.id
+    const roomId = group.roomId
+
+    if (effectiveTeacherId !== currentTeacherId) return
+    if (!roomId || !selectedTimeslotId) return
+
+    const key = attendanceKey(effectiveTeacherId, roomId, selectedTimeslotId)
+    const existing = attendanceMap.get(key)
+
+    try {
+      if (existing) {
+        await pb.collection('teacherAttendance').delete(existing.id)
+      } else {
+        await pb.collection('teacherAttendance').create({
+          teacher: effectiveTeacherId,
+          room: roomId,
+          timeslot: selectedTimeslotId,
+          date: selectedDate,
+          status: 'present',
+        })
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to update check-in')
     }
   }
 
@@ -238,7 +335,14 @@
     await loadSchedules()
   }
 
-  onMount(loadSchedules)
+  onMount(async () => {
+    await loadSchedules()
+    unsubAttendance = await pb.collection('teacherAttendance').subscribe('*', applyAttendanceEvent)
+  })
+
+  onDestroy(() => {
+    unsubAttendance?.()
+  })
 </script>
 
 {#snippet scheduleCard(entry)}
@@ -270,23 +374,46 @@
             </div>
             <div class="text-[10px] opacity-60 text-center mt-1">{group.teacher?.name || '—'}</div>
           {:else}
-            <div class="flex items-center justify-between text-xs">
-              <span class="font-bold text-primary">{group.room?.name || entry.room?.name || 'No Room'}</span>
-              <span class="opacity-60 truncate max-w-[60%] text-right">{group.subject?.name || 'No Subject'}</span>
-            </div>
-            <div class="text-[11px] mt-1">
-              <span class="opacity-60">Teacher:</span>
-              <span class="font-semibold">{group.teacher?.name || '—'}</span>
-            </div>
-            {#if group.sub}
-              <div class="text-[11px] text-info font-semibold">Sub: {group.sub.name}</div>
-            {/if}
-            {#if group.students.length}
-              <div class="flex flex-wrap gap-1 mt-1">
-                <span class="text-[10px] opacity-60">Student(s):</span>
-                <span class="text-[10px] font-medium">{group.students.join(', ')}</span>
+            {@const effectiveTeacherId = group.sub?.id || group.teacher?.id}
+            {@const attendance = attendanceMap.get(
+              attendanceKey(effectiveTeacherId, entry.room.id, selectedTimeslotId)
+            )}
+            {@const isOwner = effectiveTeacherId === currentTeacherId}
+            <div>
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-primary">{group.room?.name || entry.room?.name || 'No Room'}</span>
+                <span class="opacity-60 truncate max-w-[60%] text-right">{group.subject?.name || 'No Subject'}</span>
               </div>
-            {/if}
+              <div class="text-[11px] mt-1">
+                <span class="opacity-60">Teacher:</span>
+                <span class="font-semibold">{group.teacher?.name || '—'}</span>
+              </div>
+              {#if group.sub}
+                <div class="text-[11px] text-info font-semibold">Sub: {group.sub.name}</div>
+              {/if}
+              {#if group.students.length}
+                <div class="flex flex-wrap gap-1 mt-1">
+                  <span class="text-[10px] opacity-60">Student(s):</span>
+                  <span class="text-[10px] font-medium">{group.students.join(', ')}</span>
+                </div>
+              {/if}
+
+              <!-- Presence -->
+              {#if isOwner}
+                <button
+                  class="btn btn-xs btn-ghost w-full mt-2 font-bold {attendance ? 'text-success' : 'text-error'}"
+                  onclick={() => toggleCheckIn(group)}
+                >
+                  {attendance ? '✓ Present' : 'Absent'}
+                </button>
+              {:else}
+                <div
+                  class="text-[11px] mt-2 text-center font-bold {attendance ? 'text-success' : 'text-error opacity-60'}"
+                >
+                  {attendance ? '✓ Present' : 'Absent'}
+                </div>
+              {/if}
+            </div>
           {/if}
         {/each}
       {/if}
@@ -312,6 +439,21 @@
       {/if}
     </div>
   </div>
+{/snippet}
+
+{#snippet sectionHeader(cat)}
+  <!-- Clickable divider that toggles this category's body below it -->
+  <button
+    type="button"
+    class="divider {cat.headerClass} uppercase w-full cursor-pointer select-none hover:opacity-80"
+    onclick={() => toggleSection(cat.key)}
+    aria-expanded={!collapsedSections[cat.key]}
+  >
+    <span class="inline-flex items-center gap-2">
+      {cat.label}
+      <span class="text-sm transition-transform {collapsedSections[cat.key] ? '-rotate-90' : ''}">▾</span>
+    </span>
+  </button>
 {/snippet}
 
 <div class="p-3 sm:p-4 md:p-6 bg-base-100 min-h-screen max-w-7xl mx-auto">
@@ -365,73 +507,30 @@
     <div class="text-center text-sm opacity-50 py-10">No rooms found.</div>
   {:else}
     <div class="flex flex-col gap-10">
-      <!-- MAIN BUILDING MTM (Aisle Boxes) -->
-      <section>
-        <div class="divider font-black text-lg text-primary uppercase mb-6">MAIN BUILDING MTM</div>
-        <div class="flex flex-wrap justify-center gap-3">
-          {#each categorizedSchedules.mainMtm as aisle (aisle.label)}
-            {@render aisleContainer(aisle)}
-          {/each}
-        </div>
-      </section>
-
-      <!-- ST ROOMS (Loose Cards, not in aisles) -->
-      {#if categorizedSchedules.stRooms.length > 0}
-        <section>
-          <div class="divider font-bold text-sm opacity-50 uppercase mb-4">ST Rooms</div>
-          <div class="flex flex-wrap justify-center gap-3">
-            {#each categorizedSchedules.stRooms as entry (entry.room.id)}
-              <div class="w-full sm:w-[48%] md:w-[31%] lg:w-[19%]">
-                {@render scheduleCard(entry)}
+      <!-- One loop drives every category (aisle grids + loose lists) -->
+      {#each CATEGORY_DEFS as cat (cat.key)}
+        {@const bucket = categorizedSchedules[cat.key]}
+        {#if cat.layout === 'aisle' || bucket.length > 0}
+          <section>
+            {@render sectionHeader(cat)}
+            {#if !collapsedSections[cat.key]}
+              <div class="flex flex-wrap justify-center gap-3">
+                {#if cat.layout === 'aisle'}
+                  {#each bucket as aisle (aisle.label)}
+                    {@render aisleContainer(aisle)}
+                  {/each}
+                {:else}
+                  {#each bucket as entry (entry.room.id)}
+                    <div class="w-full sm:w-[48%] md:w-[31%] lg:w-[19%]">
+                      {@render scheduleCard(entry)}
+                    </div>
+                  {/each}
+                {/if}
               </div>
-            {/each}
-          </div>
-        </section>
-      {/if}
-
-      <!-- MAIN BUILDING GRP (Aisle Boxes) -->
-      <section>
-        <div class="divider font-black text-lg text-secondary uppercase mb-6">MAIN BUILDING GRP</div>
-        <div class="flex flex-wrap justify-center gap-3">
-          {#each categorizedSchedules.mainGrp as aisle (aisle.label)}
-            {@render aisleContainer(aisle)}
-          {/each}
-        </div>
-      </section>
-
-      <!-- ANNEX 2 BUILDING MTM (Aisle Boxes) -->
-      <section>
-        <div class="divider font-black text-lg text-accent uppercase mb-6">ANNEX 2 BUILDING MTM</div>
-        <div class="flex flex-wrap justify-center gap-3">
-          {#each categorizedSchedules.annex2 as aisle (aisle.label)}
-            {@render aisleContainer(aisle)}
-          {/each}
-        </div>
-      </section>
-
-      <!-- ANNEX 2 BUILDING GRP (Aisle Boxes) -->
-      <section>
-        <div class="divider font-black text-lg text-accent uppercase mb-6">ANNEX 2 BUILDING GRP</div>
-        <div class="flex flex-wrap justify-center gap-3">
-          {#each categorizedSchedules.annex2Grp as aisle (aisle.label)}
-            {@render aisleContainer(aisle)}
-          {/each}
-        </div>
-      </section>
-
-      <!-- OTHER ROOMS (Loose Cards) -->
-      {#if categorizedSchedules.other.length > 0}
-        <section>
-          <div class="divider font-bold text-sm opacity-50 uppercase mb-4">Other Rooms</div>
-          <div class="flex flex-wrap justify-center gap-3">
-            {#each categorizedSchedules.other as entry (entry.room.id)}
-              <div class="w-full sm:w-[48%] md:w-[31%] lg:w-[19%]">
-                {@render scheduleCard(entry)}
-              </div>
-            {/each}
-          </div>
-        </section>
-      {/if}
+            {/if}
+          </section>
+        {/if}
+      {/each}
     </div>
   {/if}
 </div>

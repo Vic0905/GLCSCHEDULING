@@ -63,6 +63,9 @@ export const guestRoutes = {
   '/login': wrap({
     asyncComponent: () => import('../routes/auth/Login.svelte'),
   }),
+  '/student': wrap({
+    asyncComponent: () => import('../routes/LandingPage/StudentPage.svelte'),
+  }),
   '*': wrap({
     asyncComponent: () => import('../routes/PageNotFound/PageNotFound.svelte'),
   }),

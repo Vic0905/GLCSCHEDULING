@@ -9,11 +9,15 @@
   let isRefreshing = $state(false)
   let teachers = $state([])
   let scheduleMap = $state(new Map())
+  let rawAttendance = $state([])
+  let nowStr = $state(new Date().toTimeString().slice(0, 5)) // NEW: "HH:MM", refreshed periodically
 
   let unsubSchedule = null
   let unsubRoomType = null
   let unsubTeacher = null
+  let unsubAttendance = null
   let debounceTimer = null
+  let nowInterval = null // NEW
 
   let cachedTimeslots = []
   let cachedTeachers = []
@@ -32,6 +36,25 @@
   const maxFridayString = $derived(
     `${currentFriday.getFullYear()}-${String(currentFriday.getMonth() + 1).padStart(2, '0')}-${String(currentFriday.getDate()).padStart(2, '0')}`
   )
+
+  // Resolves to the teacher record that belongs to the logged-in user
+  let currentTeacherId = $derived(teachers.find((t) => t.user === pb.authStore.model?.id)?.id ?? null)
+
+  // Attendance lookup keyed by teacher-room-timeslot for the selected date
+  let attendanceMap = $derived.by(() => {
+    const map = new Map()
+    for (const a of rawAttendance) {
+      map.set(`${a.teacher}-${a.room}-${a.timeslot}`, a)
+    }
+    return map
+  })
+
+  // NEW: true only while "now" falls inside this timeslot's window, and only when
+  // viewing today — so check-in can't happen for past/future dates or periods
+  function isPeriodActive(ts) {
+    if (!ts?.start || !ts?.end) return false
+    return selectedDate === today() && nowStr >= ts.start && nowStr < ts.end
+  }
 
   function formatDateShort(dateStr) {
     return new Date(dateStr)
@@ -198,11 +221,49 @@
           if (toAdd.length) teachers = [...teachers, ...toAdd]
         }
       }
+
+      await loadAttendance()
     } catch (err) {
       console.error(err)
       toast.error('Failed to load schedule data')
     } finally {
       isRefreshing = false
+    }
+  }
+
+  // Fetches just the attendance rows for the selected date
+  async function loadAttendance() {
+    try {
+      rawAttendance = await pb.collection('teacherAttendance').getFullList({
+        filter: `date = "${selectedDate}"`,
+      })
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  // CHANGED: one-way mark-present. No more deleting/toggling off, and only
+  // works while the period is actually active (see isPeriodActive above).
+  async function markPresent(teacherId, roomId, ts) {
+    if (!roomId || !ts?.id) return
+    if (teacherId !== currentTeacherId) return // safety: can't check in for someone else
+    if (!isPeriodActive(ts)) return // safety: period isn't live right now
+
+    const key = `${teacherId}-${roomId}-${ts.id}`
+    if (attendanceMap.get(key)) return // already marked — cannot change
+
+    try {
+      await pb.collection('teacherAttendance').create({
+        teacher: teacherId,
+        room: roomId,
+        timeslot: ts.id,
+        date: selectedDate,
+        status: 'present',
+      })
+      await loadAttendance()
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to mark present')
     }
   }
 
@@ -263,13 +324,21 @@
       await loadStructure()
       await loadScheduleData()
     })
+    unsubAttendance = await pb.collection('teacherAttendance').subscribe('*', loadAttendance)
+
+    // NEW: keep nowStr fresh so period-based button enabling updates live
+    nowInterval = setInterval(() => {
+      nowStr = new Date().toTimeString().slice(0, 5)
+    }, 30000)
   })
 
   onDestroy(() => {
     clearTimeout(debounceTimer)
+    clearInterval(nowInterval) // NEW
     unsubSchedule?.()
     unsubRoomType?.()
     unsubTeacher?.()
+    unsubAttendance?.()
   })
 </script>
 
@@ -294,6 +363,7 @@
     <div class="flex flex-col gap-8">
       {#each teachers as teacher (teacher.id)}
         {@const slots = scheduleMap.get(teacher.id)}
+        {@const isOwner = teacher.id === currentTeacherId}
 
         <div class="border-2 border-base-300 rounded-lg overflow-hidden bg-base-100 shadow-sm">
           <!-- HEADER: holiday left | title center | controls right -->
@@ -374,13 +444,14 @@
 
           <!-- SCHEDULE TABLE -->
           <div class="overflow-x-auto">
-            <table class="table table-xs sm:table-sm w-full min-w-[780px] border-collapse">
+            <table class="table table-xs sm:table-sm w-full min-w-[860px] border-collapse">
               <colgroup>
                 <col class="w-10" />
                 <col class="w-50" />
                 <col class="w-50" />
                 <col class="w-100" />
                 <col class="w-100" />
+                <col class="w-50" />
                 <col class="w-50" />
                 <col class="w-50" />
                 <col class="w-50" />
@@ -395,6 +466,7 @@
                   <th>LEVEL</th>
                   <th>MEMO</th>
                   <th>REMARKS</th>
+                  <th>PRESENT</th>
                 </tr>
               </thead>
               <tbody>
@@ -492,6 +564,48 @@
                         </div>
                       {:else}
                         <span>—</span>
+                      {/if}
+                    </td>
+                    <!-- PRESENT column -->
+                    <td class="text-center text-sm border border-base-900">
+                      {#if entries.length}
+                        {@const uniqueRooms = [
+                          ...new Map(entries.filter((e) => e.room?.id).map((e) => [e.room.id, e.room])).values(),
+                        ]}
+                        {#if uniqueRooms.length}
+                          <div class="flex flex-col gap-1 py-1 items-center">
+                            {#each uniqueRooms as room (room.id)}
+                              {@const attendanceKey = `${teacher.id}-${room.id}-${ts.id}`}
+                              {@const attendance = attendanceMap.get(attendanceKey)}
+                              {@const periodActive = isPeriodActive(ts)}
+                              {@const canClick = !attendance && periodActive}
+                              {#if isOwner}
+                                <button
+                                  class="btn btn-xs btn-outline {attendance ? 'btn-success' : 'btn-secondary'} {canClick
+                                    ? ''
+                                    : 'pointer-events-none'}"
+                                  onclick={() => canClick && markPresent(teacher.id, room.id, ts)}
+                                  aria-disabled={!canClick}
+                                  title={attendance
+                                    ? 'Already marked present'
+                                    : !periodActive
+                                      ? 'Only available during this period'
+                                      : ''}
+                                >
+                                  {attendance ? '✓ Present' : 'Absent'}
+                                </button>
+                              {:else}
+                                <span class="font-semibold {attendance ? 'text-success' : 'opacity-40'}">
+                                  {attendance ? '✓ Present' : 'Absent'}
+                                </span>
+                              {/if}
+                            {/each}
+                          </div>
+                        {:else}
+                          <span class="opacity-30">—</span>
+                        {/if}
+                      {:else}
+                        <span class="opacity-30">—</span>
                       {/if}
                     </td>
                   </tr>
