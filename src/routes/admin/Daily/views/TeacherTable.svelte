@@ -19,12 +19,12 @@
   let debounceTimer = null
   let nowInterval = null // NEW
 
-  let cachedTimeslots = []
-  let cachedTeachers = []
-  let cachedHolidays = []
-  let cachedRoomTypes = []
-  let teacherRoomMap = new Map()
-  let periodNumberByTimeslotId = new Map()
+  let cachedTimeslots = $state([])
+  let cachedTeachers = $state([])
+  let cachedHolidays = $state([])
+  let cachedRoomTypes = $state([])
+  let teacherRoomMap = $state(new Map())
+  let periodNumberByTimeslotId = $state(new Map())
 
   const today = () => new Date().toISOString().split('T')[0]
 

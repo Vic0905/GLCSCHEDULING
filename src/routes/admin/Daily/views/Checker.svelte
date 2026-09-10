@@ -106,6 +106,8 @@
   let unsubAttendance = null
 
   let currentTeacherId = $derived(pb.authStore.model?.id ?? null)
+  // Admins can flip anyone's attendance status, not just their own.
+  let isAdmin = $derived(pb.authStore.model?.role === 'admin')
 
   function getTodayDate() {
     return new Date().toISOString().split('T')[0]
@@ -292,11 +294,13 @@
     }
   }
 
+  // Allowed if you own the record, or if you're an admin acting on
+  // someone else's.
   async function toggleCheckIn(group) {
     const effectiveTeacherId = group.sub?.id || group.teacher?.id
     const roomId = group.roomId
 
-    if (effectiveTeacherId !== currentTeacherId) return
+    if (effectiveTeacherId !== currentTeacherId && !isAdmin) return
     if (!roomId || !selectedTimeslotId) return
 
     const key = attendanceKey(effectiveTeacherId, roomId, selectedTimeslotId)
@@ -379,6 +383,7 @@
               attendanceKey(effectiveTeacherId, entry.room.id, selectedTimeslotId)
             )}
             {@const isOwner = effectiveTeacherId === currentTeacherId}
+            {@const canToggle = isOwner || isAdmin}
             <div>
               <div class="flex items-center justify-between text-xs">
                 <span class="font-bold text-primary">{group.room?.name || entry.room?.name || 'No Room'}</span>
@@ -399,7 +404,7 @@
               {/if}
 
               <!-- Presence -->
-              {#if isOwner}
+              {#if canToggle}
                 <button
                   class="btn btn-xs btn-ghost w-full mt-2 font-bold {attendance ? 'text-success' : 'text-error'}"
                   onclick={() => toggleCheckIn(group)}

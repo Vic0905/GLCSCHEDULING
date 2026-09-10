@@ -51,6 +51,9 @@ export const adminRoutes = {
   '/daily/information/absent/absentteacher': wrap({
     asyncComponent: () => import('../routes/admin/Daily/Information/Absent/AbsentTeacher.svelte'),
   }),
+  '/daily/views/checker': wrap({
+    asyncComponent: () => import('../routes/admin/Daily/views/Checker.svelte'),
+  }),
   '*': wrap({
     asyncComponent: () => import('../routes/PageNotFound/PageNotFound.svelte'),
   }),

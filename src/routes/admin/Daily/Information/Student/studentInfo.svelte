@@ -18,6 +18,7 @@
   const BULK_DRAFT_KEY = 'student_bulk_draft'
   const BLANK_FORM = {
     id: null,
+    studentId: '',
     name: '',
     englishName: '',
     course: '',
@@ -410,9 +411,38 @@
           const dupe = students.find((s) => isActiveNameMatch(s, trimmed))
           if (dupe) return toast.error(`"${trimmed}" already exists`)
         }
-        const nextId = !formData.id ? await getNextStudentId() : null
+
+        // ── ADDED: manual Student ID entry for new students. If the chosen
+        // ID is already taken, cascade-shift that record and everyone at or
+        // above it up by one, instead of rejecting the entry. Existing
+        // students always keep their studentId when merely edited. ──────────
+        let manualStudentId = null
+        if (!formData.id) {
+          const numericId = parseInt(formData.studentId, 10)
+          if (!formData.studentId || !numericId || numericId < 1) {
+            return toast.error('Enter a valid Student ID')
+          }
+          manualStudentId = padId(numericId)
+
+          // Bump this ID and everyone at or above it, highest first so no
+          // record ever collides with one that hasn't moved yet.
+          const toShift = students
+            .filter((s) => parseInt(s.studentId, 10) >= numericId)
+            .sort((a, b) => parseInt(b.studentId, 10) - parseInt(a.studentId, 10))
+
+          if (toShift.length) {
+            await batchFetchChunked(
+              toShift.map((s) => ({
+                method: 'PATCH',
+                url: `/api/collections/student/records/${s.id}`,
+                body: { studentId: padId(parseInt(s.studentId, 10) + 1) },
+              }))
+            )
+          }
+        }
+
         const payload = {
-          ...(nextId !== null && { studentId: padId(nextId) }),
+          ...(manualStudentId !== null && { studentId: manualStudentId }),
           name: formData.name.trim(),
           englishName: trimmed,
           course: formData.course.trim(),
@@ -743,9 +773,17 @@
   }
 
   // ── Modal helpers ─────────────────────────────────────────────────────────
+  // ── ADDED: opens the modal for a brand-new student, prefilling Student ID
+  // with the next available value while leaving it editable ─────────────────
+  const openAdd = async () => {
+    formData = { ...BLANK_FORM, studentId: padId(await getNextStudentId()) }
+    showModal = true
+  }
+
   const openEdit = (s) => {
     formData = {
       id: s.id,
+      studentId: s.studentId || '',
       name: s.name || '',
       englishName: s.englishName || '',
       course: s.course || '',
@@ -850,6 +888,7 @@
             class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-warning rounded-full border-2 border-base-100"
           ></span>{/if}
       </button>
+      <button class="btn btn-outline shadow-sm" onclick={openAdd}> Add Student </button>
     </div>
   </header>
 
@@ -990,7 +1029,22 @@
         <!-- Primary Information -->
         <div>
           <p class="text-xs font-semibold text-base-content/40 uppercase tracking-wide mb-3">Primary Information</p>
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-3 gap-4">
+            <div class="form-control">
+              <label class="label py-1" for="student-id">
+                <span class="label-text font-semibold">
+                  Student ID {#if !formData.id}<span class="opacity-40 font-normal text-xs">(editable)</span>{/if}
+                </span>
+              </label>
+              <input
+                id="student-id"
+                bind:value={formData.studentId}
+                type="text"
+                inputmode="numeric"
+                disabled={!!formData.id}
+                class="input input-bordered w-full focus:input-primary disabled:opacity-50"
+              />
+            </div>
             <div class="form-control">
               <label class="label py-1" for="english-name">
                 <span class="label-text font-semibold">

@@ -13,8 +13,8 @@
   let unsubSchedule = null
   let debounceTimer = null
 
-  let cachedTimeslots = []
-  let cachedHolidays = []
+  let cachedTimeslots = $state([])
+  let cachedHolidays = $state([])
 
   const today = () => new Date().toISOString().split('T')[0]
 
