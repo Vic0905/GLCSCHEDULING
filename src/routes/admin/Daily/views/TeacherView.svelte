@@ -133,7 +133,7 @@
         ]),
         h(
           'div',
-          { class: 'flex flex-wrap justify-center gap-1' },
+          { class: 'flex flex-wrap justify-center gap-2' },
           allStudents.map((name) => h('span', { class: 'text-xs font-semibold whitespace-nowrap' }, name))
         ),
         ...(customSchedules.length

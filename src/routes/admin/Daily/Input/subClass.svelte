@@ -200,8 +200,8 @@
           allStudents.map((name) => h('span', { class: 'text-xs font-semibold badge-xs whitespace-nowrap' }, name))
         ),
         hasSub
-          ? h('div', { class: 'flex items-center justify-center gap-1 mt-1' }, [
-              h('span', { class: 'text text-sm font-semibold' }, `Sub: ${first.sub.name}`),
+          ? h('div', { class: 'flex items-center justify-center gap-1 mt-3' }, [
+              h('span', { class: 'text text-sm font-semibold text-info' }, `Sub: ${first.sub.name}`),
             ])
           : h('span', { class: 'text text-xs opacity-40 mt-1' }, 'No sub assigned'),
       ].filter(Boolean)
@@ -405,17 +405,24 @@
       const makeupSet = new Set() // unique teacher-timeslot cells tagged as make-up
       const makeupCountMap = new Map() // teacherId -> count of make-up class records today
       const bookedTeacherIds = new Set()
+
       for (const s of normalized) {
+        const cellKey = `${s.teacherId}-${s.timeslotId}`
+
         if (s.sub) {
-          subSet.add(`${s.teacherId}-${s.timeslotId}`)
-          subCountMap.set(s.sub.id, (subCountMap.get(s.sub.id) || 0) + 1)
+          if (!subSet.has(cellKey)) {
+            subCountMap.set(s.sub.id, (subCountMap.get(s.sub.id) || 0) + 1)
+          }
+          subSet.add(cellKey)
         }
         if (s.teacherId) bookedTeacherIds.add(s.teacherId)
 
         const isMakeup = s.customSchedule?.some((cs) => cs.name?.toLowerCase().trim() === MAKEUP_SCHEDULE_NAME)
         if (isMakeup) {
-          makeupSet.add(`${s.teacherId}-${s.timeslotId}`)
-          if (s.teacherId) makeupCountMap.set(s.teacherId, (makeupCountMap.get(s.teacherId) || 0) + 1)
+          if (!makeupSet.has(cellKey) && s.teacherId) {
+            makeupCountMap.set(s.teacherId, (makeupCountMap.get(s.teacherId) || 0) + 1)
+          }
+          makeupSet.add(cellKey)
         }
       }
       subCount = subSet.size
