@@ -175,7 +175,7 @@
 <div class="max-w-xl mx-auto p-6 space-y-6">
   <div class="text-center space-y-1">
     <h1 class="text-2xl font-bold">STUDENT SCHEDULE</h1>
-    <p class="text-base-content/70">{formattedDate}</p>
+    <p class="text-sm">{formattedDate}</p>
   </div>
 
   <form onsubmit={runSearch} class="flex flex-col sm:flex-row gap-2">
@@ -245,7 +245,7 @@
   {#if hasSearched && !loading}
     <div class="space-y-4">
       {#if selectedStudent}
-        <div class="rounded-box bg-base-200 p-4 space-y-1">
+        <div class="rounded-box bg-base-200 p-4 space-y-1 mt-15">
           <p><span class="font-semibold">Student Name:</span> {selectedStudent[studentNameField] ?? '—'}</p>
           <p><span class="font-semibold">Course:</span> {selectedStudent.course || '—'}</p>
           <p><span class="font-semibold">Level:</span> {selectedStudent.level || '—'}</p>
@@ -258,19 +258,22 @@
         <ul class="list bg-base-100 rounded-box shadow-md">
           {#each entries as entry (entry.id)}
             <li class="list-row flex flex-col items-start gap-1">
-              <span class="text-xs text-base-content/60">{timeslotLabel(entry.expand?.timeslot)}</span>
-              <span class="font-semibold">{entry.expand?.subject?.name ?? '—'}</span>
-              <span class="text-sm text-base-content/70">
-                Taught by {entry.expand?.teacher?.name ?? '—'} in Room {entry.expand?.room?.name ?? '—'}
+              <span class="text-xs font-semibold">{timeslotLabel(entry.expand?.timeslot)}</span>
+              <span class="font-semibold"> Subject: {entry.expand?.subject?.name ?? '—'}</span>
+              <span class="text-sm font-semibold">
+                Teacher: {entry.expand?.teacher?.name ?? '—'}
               </span>
-              {#if entry.expand?.sub}
+              <span class="text-sm font-semibold">
+                Room: {entry.expand?.room?.name ?? '—'}
+              </span>
+              <!-- {#if entry.expand?.sub}
                 <span class="badge badge-warning badge-sm">
                   Covered by {entry.expand.sub.name ?? entry.expand.sub.id}
                 </span>
               {/if}
               {#if entry.status && entry.status !== 'show'}
                 <span class="badge badge-ghost badge-sm">{entry.status}</span>
-              {/if}
+              {/if} -->
             </li>
           {/each}
         </ul>

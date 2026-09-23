@@ -54,6 +54,9 @@ export const adminRoutes = {
   '/daily/views/checker': wrap({
     asyncComponent: () => import('../routes/admin/Daily/views/Checker.svelte'),
   }),
+  '/student': wrap({
+    asyncComponent: () => import('../routes/LandingPage/StudentPage.svelte'),
+  }),
   '*': wrap({
     asyncComponent: () => import('../routes/PageNotFound/PageNotFound.svelte'),
   }),
