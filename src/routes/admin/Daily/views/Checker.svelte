@@ -90,6 +90,14 @@
     },
   ]
 
+  // Visual language for a room tile's status. Order matters for the legend.
+  const STATUS_STYLES = {
+    present: { label: 'Present', classes: 'border-success bg-success/10' },
+    absent: { label: 'Absent', classes: 'border-error bg-error/10' },
+    break: { label: 'Break', classes: 'border-warning bg-warning/10' },
+    vacant: { label: 'No class', classes: 'border-base-300 bg-base-100 opacity-40' },
+  }
+
   let selectedDate = $state(getTodayDate())
   let selectedTimeslotId = $state(null)
   let timeslots = $state([])
@@ -97,6 +105,7 @@
   let rawRecords = $state([])
   let rawAttendance = $state([])
   let isLoading = $state(false)
+  let selectedRoomId = $state(null)
 
   // One collapse flag per category, derived from CATEGORY_DEFS so adding a
   // new category automatically gets a toggle without touching this line.
@@ -163,6 +172,41 @@
     return range ? { key: cat.key, rangeLabel: range.label } : { key: 'other' }
   }
 
+  // A room's overall status for tile coloring. Absent takes priority over
+  // present (it's the thing that needs attention), a room that's only in
+  // a break period shows as "break", and no scheduled groups is "vacant".
+  function getRoomStatus(entry) {
+    if (!entry.groups.length) return 'vacant'
+    let anyAbsent = false
+    let anyPresent = false
+    let allBreak = true
+    for (const group of entry.groups) {
+      if (getBreakInfo(group)) continue
+      allBreak = false
+      const effectiveTeacherId = group.sub?.id || group.teacher?.id
+      const attendance = attendanceMap.get(attendanceKey(effectiveTeacherId, entry.room.id, selectedTimeslotId))
+      if (attendance) anyPresent = true
+      else anyAbsent = true
+    }
+    if (allBreak) return 'break'
+    if (anyAbsent) return 'absent'
+    if (anyPresent) return 'present'
+    return 'break'
+  }
+
+  // Short hover tooltip so the compact tile still surfaces full detail
+  // without a click.
+  function roomTileTooltip(entry) {
+    if (!entry.groups.length) return `${entry.room?.name || 'Room'} — no class scheduled`
+    return entry.groups
+      .map((g) => {
+        const breakInfo = getBreakInfo(g)
+        if (breakInfo) return `${breakInfo.name} (${g.teacher?.name || '—'})`
+        return `${g.subject?.name || 'No subject'} — ${g.teacher?.name || '—'}`
+      })
+      .join(' / ')
+  }
+
   // Raw scheduled records for the selected timeslot, grouped by teacher+room
   // (a room can theoretically have more than one teacher/group in the same
   // timeslot, e.g. a sub handoff, so we keep this as a list per room).
@@ -203,23 +247,34 @@
     return map
   })
 
-  // Every enabled room, bucketed by CATEGORY_DEFS (into aisle sub-ranges
-  // where applicable), each carrying whatever scheduled groups matched it.
-  let categorizedSchedules = $derived.by(() => {
-    const buckets = {}
-    for (const cat of CATEGORY_DEFS) {
-      buckets[cat.key] = cat.ranges ? cat.ranges.map((r) => ({ ...r, rooms: [] })) : []
-    }
-
+  // Every enabled room paired with whatever scheduled groups matched it,
+  // keyed by room id. Single source both the grid tiles and the detail
+  // modal read from, so the modal stays live if attendance changes while
+  // it's open.
+  let entriesByRoomId = $derived.by(() => {
     const groupsByRoom = new Map()
     for (const group of groupedSchedules) {
       if (!group.roomId) continue
       if (!groupsByRoom.has(group.roomId)) groupsByRoom.set(group.roomId, [])
       groupsByRoom.get(group.roomId).push(group)
     }
+    const map = new Map()
+    for (const room of allRooms) {
+      map.set(room.id, { room, groups: groupsByRoom.get(room.id) || [] })
+    }
+    return map
+  })
+
+  // Every enabled room, bucketed by CATEGORY_DEFS (into aisle sub-ranges
+  // where applicable), each carrying its entry from entriesByRoomId.
+  let categorizedSchedules = $derived.by(() => {
+    const buckets = {}
+    for (const cat of CATEGORY_DEFS) {
+      buckets[cat.key] = cat.ranges ? cat.ranges.map((r) => ({ ...r, rooms: [] })) : []
+    }
 
     for (const room of allRooms) {
-      const entry = { room, groups: groupsByRoom.get(room.id) || [] }
+      const entry = entriesByRoomId.get(room.id)
       const { key, rangeLabel } = categorizeRoom(room.name)
       if (rangeLabel) {
         buckets[key].find((a) => a.label === rangeLabel).rooms.push(entry)
@@ -235,6 +290,11 @@
 
     return buckets
   })
+
+  // The room currently open in the detail panel, re-derived from
+  // entriesByRoomId every time so it reflects realtime attendance changes
+  // instead of freezing on whatever was true when it was opened.
+  let selectedEntry = $derived.by(() => (selectedRoomId ? (entriesByRoomId.get(selectedRoomId) ?? null) : null))
 
   async function getCached(key, fetcher) {
     if (!cache[key].length) cache[key] = await fetcher()
@@ -296,9 +356,8 @@
 
   // Allowed if you own the record, or if you're an admin acting on
   // someone else's.
-  async function toggleCheckIn(group) {
+  async function toggleCheckIn(group, roomId) {
     const effectiveTeacherId = group.sub?.id || group.teacher?.id
-    const roomId = group.roomId
 
     if (effectiveTeacherId !== currentTeacherId && !isAdmin) return
     if (!roomId || !selectedTimeslotId) return
@@ -325,16 +384,19 @@
   }
 
   async function changeDay(days) {
+    selectedRoomId = null
     selectedDate = offsetDate(selectedDate, days)
     await loadSchedules()
   }
 
   async function onDateChange(e) {
+    selectedRoomId = null
     selectedDate = e.target.value
     await loadSchedules()
   }
 
   async function goToToday() {
+    selectedRoomId = null
     selectedDate = getTodayDate()
     await loadSchedules()
   }
@@ -349,98 +411,49 @@
   })
 </script>
 
-{#snippet scheduleCard(entry)}
-  <!-- Compact inner card for individual rooms to fit inside the aisle box -->
-  <div class="card bg-base-100 border border-base-200 shadow-sm w-full mb-2 last:mb-0">
-    <div class="card-body p-2">
-      {#if entry.groups.length === 0}
-        <!-- No class scheduled in this room for the selected timeslot -->
-        <div class="flex items-center justify-between text-xs opacity-40">
-          <span class="font-bold">{entry.room?.name || 'No Room'}</span>
-          <span class="italic">No class</span>
-        </div>
-        {#if entry.room?.expand?.teacher}
-          <div class="text-[10px] opacity-40 text-center mt-1">
-            {entry.room.expand.teacher.name}
-          </div>
-        {/if}
-      {:else}
-        {#each entry.groups as group (group.key)}
-          {@const breakInfo = getBreakInfo(group)}
-          {#if breakInfo}
-            <div
-              class="text-center font-bold text-xs py-1 rounded"
-              style={breakInfo.color
-                ? `background:${breakInfo.color}20; color:${breakInfo.color};`
-                : 'background:#f3f4f6; color:#6b7280;'}
-            >
-              {breakInfo.name.toUpperCase()}
-            </div>
-            <div class="text-[10px] opacity-60 text-center mt-1">{group.teacher?.name || '—'}</div>
-          {:else}
-            {@const effectiveTeacherId = group.sub?.id || group.teacher?.id}
-            {@const attendance = attendanceMap.get(
-              attendanceKey(effectiveTeacherId, entry.room.id, selectedTimeslotId)
-            )}
-            {@const isOwner = effectiveTeacherId === currentTeacherId}
-            {@const canToggle = isOwner || isAdmin}
-            <div>
-              <div class="flex items-center justify-between text-xs">
-                <span class="font-bold text-primary">{group.room?.name || entry.room?.name || 'No Room'}</span>
-                <span class="opacity-60 truncate max-w-[60%] text-right">{group.subject?.name || 'No Subject'}</span>
-              </div>
-              <div class="text-[11px] mt-1">
-                <span class="opacity-60">Teacher:</span>
-                <span class="font-semibold">{group.teacher?.name || '—'}</span>
-              </div>
-              {#if group.sub}
-                <div class="text-[11px] text-info font-semibold">Sub: {group.sub.name}</div>
-              {/if}
-              {#if group.students.length}
-                <div class="flex flex-wrap gap-1 mt-1">
-                  <span class="text-[10px] opacity-60">Student(s):</span>
-                  <span class="text-[10px] font-medium">{group.students.join(', ')}</span>
-                </div>
-              {/if}
-
-              <!-- Presence -->
-              {#if canToggle}
-                <button
-                  class="btn btn-xs btn-ghost w-full mt-2 font-bold {attendance ? 'text-success' : 'text-error'}"
-                  onclick={() => toggleCheckIn(group)}
-                >
-                  {attendance ? '✓ Present' : 'Absent'}
-                </button>
-              {:else}
-                <div
-                  class="text-[11px] mt-2 text-center font-bold {attendance ? 'text-success' : 'text-error opacity-60'}"
-                >
-                  {attendance ? '✓ Present' : 'Absent'}
-                </div>
-              {/if}
-            </div>
-          {/if}
-        {/each}
-      {/if}
-    </div>
-  </div>
+{#snippet roomTile(entry)}
+  <!-- One physical room, sized and colored like a floor-plan slot rather
+       than a card. Tap opens the detail panel below. -->
+  {@const status = getRoomStatus(entry)}
+  <button
+    type="button"
+    class="aspect-square rounded-lg border-2 flex flex-col items-center justify-center gap-0.5 p-1 cursor-pointer transition hover:-translate-y-0.5 hover:shadow-md {STATUS_STYLES[
+      status
+    ].classes}"
+    onclick={() => (selectedRoomId = entry.room.id)}
+    title={roomTileTooltip(entry)}
+  >
+    <span class="font-black text-[11px] leading-none">{entry.room?.name || '?'}</span>
+    {#if entry.groups.length > 1}
+      <span class="text-[9px] opacity-70">×{entry.groups.length}</span>
+    {:else if entry.groups.length === 1}
+      {@const g = entry.groups[0]}
+      {@const breakInfo = getBreakInfo(g)}
+      <span class="text-[9px] opacity-70 truncate max-w-full px-0.5">
+        {breakInfo ? breakInfo.name : g.teacher?.name || g.subject?.name || ''}
+      </span>
+    {/if}
+  </button>
 {/snippet}
 
 {#snippet aisleContainer(aisleObj)}
-  <!-- Aisle Box Container mirroring the physical grid blocks -->
+  <!-- Aisle box mirroring one physical grid block; rooms inside are laid
+       out as a mini floor-plan grid instead of a stacked list. -->
   <div
     class="card bg-base-200 border-2 border-base-300 shadow-md w-full sm:w-[48%] md:w-[31%] lg:w-[19%] flex-shrink-0"
   >
     <div class="bg-neutral text-neutral-content text-center font-bold text-xs py-2 rounded-t-box">
       {aisleObj.label}
     </div>
-    <div class="card-body p-2 min-h-[120px] flex flex-col justify-start">
+    <div class="card-body p-3 min-h-[120px]">
       {#if aisleObj.rooms.length === 0}
-        <div class="text-center text-xs opacity-40 mt-4 italic">No rooms in range</div>
+        <div class="text-center text-xs opacity-40 py-6 italic">No rooms in range</div>
       {:else}
-        {#each aisleObj.rooms as entry (entry.room.id)}
-          {@render scheduleCard(entry)}
-        {/each}
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(58px,1fr))] gap-1.5">
+          {#each aisleObj.rooms as entry (entry.room.id)}
+            {@render roomTile(entry)}
+          {/each}
+        </div>
       {/if}
     </div>
   </div>
@@ -496,7 +509,7 @@
   </div>
 
   <!-- Timeslot chips -->
-  <div class="flex gap-2 overflow-x-auto pb-2 mb-6 -mx-1 px-1">
+  <div class="flex gap-2 overflow-x-auto pb-2 mb-4 -mx-1 px-1">
     {#each timeslots as ts (ts.id)}
       <button
         class="btn btn-sm shrink-0 {selectedTimeslotId === ts.id ? 'btn-primary' : 'btn-outline bg-base-100'}"
@@ -504,6 +517,16 @@
       >
         {ts.start} - {ts.end}
       </button>
+    {/each}
+  </div>
+
+  <!-- Status legend for the room tiles -->
+  <div class="flex flex-wrap gap-3 mb-6 text-xs">
+    {#each Object.values(STATUS_STYLES) as s}
+      <span class="flex items-center gap-1.5">
+        <span class="w-3 h-3 rounded-sm border-2 {s.classes}"></span>
+        {s.label}
+      </span>
     {/each}
   </div>
 
@@ -519,23 +542,119 @@
           <section>
             {@render sectionHeader(cat)}
             {#if !collapsedSections[cat.key]}
-              <div class="flex flex-wrap justify-center gap-3">
-                {#if cat.layout === 'aisle'}
+              {#if cat.layout === 'aisle'}
+                <div class="flex flex-wrap justify-center gap-3">
                   {#each bucket as aisle (aisle.label)}
                     {@render aisleContainer(aisle)}
                   {/each}
-                {:else}
+                </div>
+              {:else}
+                <div class="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">
                   {#each bucket as entry (entry.room.id)}
-                    <div class="w-full sm:w-[48%] md:w-[31%] lg:w-[19%]">
-                      {@render scheduleCard(entry)}
-                    </div>
+                    {@render roomTile(entry)}
                   {/each}
-                {/if}
-              </div>
+                </div>
+              {/if}
             {/if}
           </section>
         {/if}
       {/each}
+    </div>
+  {/if}
+
+  <!-- Room detail panel: opened by tapping any tile. Keeps the grid a pure
+       floor-plan view while still surfacing full class info + check-in. -->
+  {#if selectedEntry}
+    <div class="modal modal-open">
+      <div class="modal-box relative">
+        <button
+          type="button"
+          class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3"
+          onclick={() => (selectedRoomId = null)}
+          aria-label="Close"
+        >
+          ✕
+        </button>
+        <h3 class="font-black text-xl mb-1">{selectedEntry.room?.name || 'Room'}</h3>
+        {#if selectedEntry.room?.expand?.teacher}
+          <p class="text-xs opacity-50 mb-3">Home teacher: {selectedEntry.room.expand.teacher.name}</p>
+        {/if}
+
+        {#if selectedEntry.groups.length === 0}
+          <p class="text-sm opacity-60 italic py-6 text-center">No class scheduled this period.</p>
+        {:else}
+          <div class="flex flex-col gap-4">
+            {#each selectedEntry.groups as group (group.key)}
+              {@const breakInfo = getBreakInfo(group)}
+              {#if breakInfo}
+                <div
+                  class="text-center font-bold text-sm py-2 rounded"
+                  style={breakInfo.color
+                    ? `background:${breakInfo.color}20; color:${breakInfo.color};`
+                    : 'background:#f3f4f6; color:#6b7280;'}
+                >
+                  {breakInfo.name.toUpperCase()}
+                </div>
+                <div class="text-xs opacity-60 text-center">{group.teacher?.name || '—'}</div>
+              {:else}
+                {@const effectiveTeacherId = group.sub?.id || group.teacher?.id}
+                {@const attendance = attendanceMap.get(
+                  attendanceKey(effectiveTeacherId, selectedEntry.room.id, selectedTimeslotId)
+                )}
+                {@const isOwner = effectiveTeacherId === currentTeacherId}
+                {@const canToggle = isOwner || isAdmin}
+                <div class="border-t border-base-200 pt-3 first:border-0 first:pt-0">
+                  <div class="flex items-center justify-between text-sm">
+                    <span class="opacity-60">Subject</span>
+                    <span class="font-semibold">{group.subject?.name || 'No Subject'}</span>
+                  </div>
+                  <div class="flex items-center justify-between text-sm mt-1">
+                    <span class="opacity-60">Teacher</span>
+                    <span class="font-semibold">{group.teacher?.name || '—'}</span>
+                  </div>
+                  {#if group.sub}
+                    <div class="flex items-center justify-between text-sm mt-1">
+                      <span class="opacity-60">Sub</span>
+                      <span class="font-semibold text-info">{group.sub.name}</span>
+                    </div>
+                  {/if}
+                  {#if group.students.length}
+                    <div class="text-sm mt-1">
+                      <span class="opacity-60">Student(s):</span>
+                      <span class="font-medium">{group.students.join(', ')}</span>
+                    </div>
+                  {/if}
+
+                  {#if canToggle}
+                    <button
+                      class="btn btn-sm w-full mt-3 font-bold {attendance
+                        ? 'btn-success btn-outline'
+                        : 'btn-error btn-outline'}"
+                      onclick={() => toggleCheckIn(group, selectedEntry.room.id)}
+                    >
+                      {attendance ? '✓ Present — tap to undo' : 'Mark as Present'}
+                    </button>
+                  {:else}
+                    <div
+                      class="text-sm mt-3 text-center font-bold {attendance ? 'text-success' : 'text-error opacity-60'}"
+                    >
+                      {attendance ? '✓ Present' : 'Absent'}
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <div
+        class="modal-backdrop"
+        role="button"
+        tabindex="0"
+        aria-label="Close"
+        onclick={() => (selectedRoomId = null)}
+        onkeydown={(e) => e.key === 'Enter' && (selectedRoomId = null)}
+      ></div>
     </div>
   {/if}
 </div>
