@@ -118,19 +118,36 @@
   // Admins can flip anyone's attendance status, not just their own.
   let isAdmin = $derived(pb.authStore.model?.role === 'admin')
 
+  // Formats a Date as YYYY-MM-DD using the *local* calendar day
+  function toDateStr(d) {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
+  // Parses YYYY-MM-DD as local midnight (a bare 'YYYY-MM-DD' string is parsed as UTC)
+  function parseDate(dateStr) {
+    return new Date(`${dateStr}T00:00:00`)
+  }
+
   function getTodayDate() {
-    return new Date().toISOString().split('T')[0]
+    return toDateStr(new Date())
   }
 
   function formatDateDisplay(dateStr) {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+    return parseDate(dateStr).toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    })
   }
 
   function offsetDate(dateStr, days) {
-    const d = new Date(dateStr)
+    const d = parseDate(dateStr)
     d.setDate(d.getDate() + days)
-    return d.toISOString().split('T')[0]
+    return toDateStr(d)
   }
 
   function getRoomNum(roomName) {

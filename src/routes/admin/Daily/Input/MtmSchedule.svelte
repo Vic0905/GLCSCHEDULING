@@ -30,7 +30,7 @@
   let selectedDate = $state(getInitialDate())
   let todayHoliday = $state(null)
   let isLoading = $state(false)
-  let scheduleStatusSummary = $state({ tota: 0, showCount: 0, draftCount: 0 })
+  let scheduleStatusSummary = $state({ total: 0, showCount: 0, draftCount: 0 })
 
   // ─────────────────────────────────────────────
   // SECTION 3: Pure helper functions
