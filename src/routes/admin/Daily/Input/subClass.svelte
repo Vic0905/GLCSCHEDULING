@@ -88,6 +88,12 @@
     })
   }
 
+  // Staff accounts can't see draft schedules
+  function isStaff() {
+    const user = pb.authStore.record ?? pb.authStore.model // .record on SDK v0.23+, .model on older
+    return user?.role?.toLowerCase() === 'staff'
+  }
+
   // ─────────────────────────────────────────────
   // SECTION 4: Grid cell formatters
   // ─────────────────────────────────────────────
@@ -361,8 +367,7 @@
             filter: 'roomType = "mtm"',
           }),
       pb.collection('dailySchedule').getFullList({
-        filter: `date >= "${date} 00:00:00" && date <= "${date} 23:59:59"`,
-        // sub is expanded so first.sub = teacher object, not just an ID
+        filter: `date >= "${date} 00:00:00" && date <= "${date} 23:59:59"${isStaff() ? ' && status != "draft"' : ''}`,
         expand: 'teacher,student,subject,room,timeslot,customSchedule,sub',
       }),
     ])
