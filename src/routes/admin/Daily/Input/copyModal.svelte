@@ -9,7 +9,7 @@
   let targetStart = $state('')
   let targetEnd = $state('')
   let summary = $state(null) // { created, skipped, graduated }
-  let preview = $state(null) // { graduatedStudents, sourceSchedules }
+  let preview = $state(null) // { graduatedStudents, extendedStudents, replacements, sourceSchedules }
 
   // The "Sub Class" customSchedule record id — resolved lazily and cached.
   // Copied records should never carry forward a sub assignment or this tag.
@@ -38,6 +38,17 @@
       cur.setDate(cur.getDate() + 1)
     }
     return dates
+  }
+
+  /** YYYY-MM-DD part of a PocketBase date string ('' if empty). */
+  const dayOf = (v) => v?.split(' ')[0] || ''
+
+  // Identifies "the same student" across records. "Extend" creates a NEW student
+  // record that copies the original's linked user, so that's the safest key.
+  // Falls back to English Name for older records that have no user.
+  function personKey(s) {
+    const user = Array.isArray(s.user) ? s.user[0] : s.user
+    return user || `name:${(s.englishName || '').toLowerCase()}`
   }
 
   async function resolveSubClassScheduleId() {
@@ -83,22 +94,51 @@
       const studentIds = [...new Set(sourceSchedules.map((s) => s.expand?.student?.id || s.student).filter(Boolean))]
 
       const graduatedStudents = []
+      const extendedStudents = []
+      const replacements = {} // original student id -> id of the extended record that continues them
       if (studentIds.length) {
         const studentRecords = await pb.collection('student').getFullList({
-          fields: 'id,englishName,end',
+          fields: 'id,englishName,user,start,end',
         })
         const studentMap = new Map(studentRecords.map((s) => [s.id, s]))
+
+        // Group every record by person so an extended student can be found
+        const recordsByPerson = new Map()
+        for (const r of studentRecords) {
+          const key = personKey(r)
+          if (!recordsByPerson.has(key)) recordsByPerson.set(key, [])
+          recordsByPerson.get(key).push(r)
+        }
+
+        // The record that continues this student into the target range, if there is one:
+        // same person, still running at the target start, and already started by the target end.
+        // If there are several, take the one that ends soonest (the one active right at the target start).
+        const findExtension = (student) =>
+          (recordsByPerson.get(personKey(student)) || [])
+            .filter(
+              (r) =>
+                r.id !== student.id && dayOf(r.end) >= targetStart && (!dayOf(r.start) || dayOf(r.start) <= targetEnd)
+            )
+            .sort((a, b) => dayOf(a.end).localeCompare(dayOf(b.end)) || dayOf(b.start).localeCompare(dayOf(a.start)))[0]
+
         for (const id of studentIds) {
           const student = studentMap.get(id)
           if (!student) continue
-          const studentEnd = student.end?.split(' ')[0]
+          const studentEnd = dayOf(student.end)
           if (studentEnd && studentEnd < targetStart) {
-            graduatedStudents.push({ id, name: student.englishName, end: studentEnd })
+            const extension = findExtension(student)
+            if (extension) {
+              // Not graduated — they were extended. Their schedules move to the extended record.
+              replacements[id] = extension.id
+              extendedStudents.push({ id, name: student.englishName, newEnd: dayOf(extension.end) })
+            } else {
+              graduatedStudents.push({ id, name: student.englishName, end: studentEnd })
+            }
           }
         }
       }
 
-      preview = { graduatedStudents, sourceSchedules }
+      preview = { graduatedStudents, extendedStudents, replacements, sourceSchedules }
     } catch (err) {
       console.error(err)
       toast.error('Failed to load preview')
@@ -113,7 +153,7 @@
     isSaving = true
     summary = null
 
-    const { sourceSchedules } = preview
+    const { sourceSchedules, replacements } = preview
     const graduatedIds = new Set(preview.graduatedStudents.map((s) => s.id))
     const dates = dateRange(targetStart, targetEnd)
 
@@ -152,7 +192,10 @@
           const subjectId = src.expand?.subject?.id || src.subject
           const roomId = src.expand?.room?.id || src.room
           const timeslotId = src.expand?.timeslot?.id || src.timeslot
-          const studentId = src.expand?.student?.id || src.student || null
+          const sourceStudentId = src.expand?.student?.id || src.student || null
+          // An extended student's schedules are copied onto their extended record,
+          // so the new record shows up in that student's own schedule view.
+          const studentId = sourceStudentId ? replacements[sourceStudentId] || sourceStudentId : null
 
           // customSchedule is a multi-relation field, so the raw value is
           // an array of ID strings (it isn't in the `expand` above). The
@@ -348,6 +391,23 @@
           </div>
         {:else}
           <div class="text-sm text-success">No graduated students detected — all schedules will be copied.</div>
+        {/if}
+
+        {#if preview.extendedStudents.length}
+          <div class="flex flex-col gap-2">
+            <div class="text-sm font-medium text-info">
+              {preview.extendedStudents.length} extended student{preview.extendedStudents.length > 1 ? 's' : ''} will be
+              copied to their extended record
+            </div>
+            <div class="rounded-lg bg-base-200 p-3 flex flex-col gap-1 max-h-48 overflow-y-auto">
+              {#each preview.extendedStudents as s}
+                <div class="flex justify-between text-xs">
+                  <span class="font-medium">{s.name}</span>
+                  <span class="text-base-content/50">now ends {s.newEnd}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
         {/if}
 
         <div class="flex gap-2 justify-end">

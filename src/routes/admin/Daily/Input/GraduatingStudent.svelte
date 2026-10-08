@@ -5,21 +5,46 @@
   import { toast } from 'svelte-sonner'
   import { pb } from '../../../../lib/Pocketbase.svelte'
 
+  // Graduation is held 1 day BEFORE the student's end date (end = Sat, graduation = Fri).
+  // Change this number if the gap ever changes. Set to 0 to use the end date as-is.
+  const GRADUATION_OFFSET_DAYS = 1
+
   let gridInstance = $state(null)
   let isLoading = $state(false)
   let weekStart = $state(getWeekStart(new Date()))
+
+  // Format a Date as YYYY-MM-DD using LOCAL time (toISOString() uses UTC and can shift the day)
+  function toDateStr(d) {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
+  // Identifies "the same student" across records. Extended/changed records copy the
+  // original's linked user, so that's the safest key. Falls back to English Name
+  // for older records that have no user.
+  function personKey(s) {
+    const user = Array.isArray(s.user) ? s.user[0] : s.user
+    return user || `name:${(s.englishName || '').toLowerCase()}`
+  }
+
+  // Parse YYYY-MM-DD as LOCAL midnight
+  function parseLocalDate(str) {
+    return new Date(`${str}T00:00:00`)
+  }
 
   function getWeekStart(date) {
     const d = new Date(date)
     const day = d.getDay() // Sunday = 0 ... Saturday = 6
     d.setDate(d.getDate() - day) // always lands on Sunday
-    return d.toISOString().split('T')[0]
+    return toDateStr(d)
   }
 
   function getWeekRangeDisplay(startDate) {
-    const start = new Date(startDate)
+    const start = parseLocalDate(startDate)
     const end = new Date(start)
-    end.setDate(start.getDate() + 6) // Monday + 4 days = Friday
+    end.setDate(start.getDate() + 6) // Sunday + 6 days = Saturday
 
     const opts = { month: 'long', day: 'numeric' }
 
@@ -35,27 +60,61 @@
     isLoading = true
 
     try {
-      const startD = new Date(weekStart)
-      const endD = new Date(startD)
-      endD.setDate(startD.getDate() + 6)
+      // The week shown is the week of the GRADUATION date (Sun - Sat).
+      // Since graduation = end - OFFSET, the matching end dates are shifted forward by OFFSET.
+      // Example: week Sun Jan 5 - Sat Jan 11, offset 1 -> end dates Mon Jan 6 - Sun Jan 12
+      // (so a Saturday end date of Jan 11 shows up with a Friday Jan 10 graduation).
+      const rangeStart = parseLocalDate(weekStart)
+      rangeStart.setDate(rangeStart.getDate() + GRADUATION_OFFSET_DAYS)
 
-      const startDateStr = `${weekStart} 00:00:00`
-      const endDateStr = `${endD.toISOString().split('T')[0]} 23:59:59`
+      const rangeEnd = parseLocalDate(weekStart)
+      rangeEnd.setDate(rangeEnd.getDate() + 6 + GRADUATION_OFFSET_DAYS)
 
-      const students = await pb.collection('student').getFullList({
+      const startDateStr = `${toDateStr(rangeStart)} 00:00:00`
+      const endDateStr = `${toDateStr(rangeEnd)} 23:59:59`
+
+      const weekStudents = await pb.collection('student').getFullList({
         filter: `end >= "${startDateStr}" && end <= "${endDateStr}"`,
         sort: 'end',
       })
 
-      const data = students.map((s) => [
-        s.englishName || '-',
-        s.name || '-',
-        s.course || '-',
-        s.level || '-',
-        s.remarks || '-',
-        s.status || '-',
-        new Date(s.end).toLocaleDateString(),
-      ])
+      // Hide students who were extended.
+      // "Extend" in Student Info creates a NEW record (same linked user, later end date)
+      // and keeps the original, so the original would still look like it's graduating.
+      // If the same person has any record ending later, they are not graduating yet.
+      const laterRecords = await pb.collection('student').getFullList({
+        filter: `end >= "${startDateStr}"`,
+        fields: 'id,user,englishName,end',
+      })
+
+      const latestEnd = new Map() // person -> latest end date (YYYY-MM-DD) across all their records
+      for (const r of laterRecords) {
+        if (!r.end) continue
+        const key = personKey(r)
+        const endDay = r.end.slice(0, 10)
+        if (!latestEnd.has(key) || endDay > latestEnd.get(key)) latestEnd.set(key, endDay)
+      }
+
+      const students = weekStudents.filter((s) => {
+        const later = latestEnd.get(personKey(s))
+        return !(later && later > s.end.slice(0, 10))
+      })
+
+      const data = students.map((s) => {
+        // Graduation date = end date minus the offset
+        const graduationDate = new Date(s.end)
+        graduationDate.setDate(graduationDate.getDate() - GRADUATION_OFFSET_DAYS)
+
+        return [
+          s.englishName || '-',
+          s.name || '-',
+          s.course || '-',
+          s.level || '-',
+          s.remarks || '-',
+          s.status || '-',
+          graduationDate.toLocaleDateString(),
+        ]
+      })
 
       const columns = [
         { name: 'English Name', width: '220px' },
@@ -92,7 +151,7 @@
   }
 
   async function changeWeek(weeks) {
-    const d = new Date(weekStart)
+    const d = parseLocalDate(weekStart)
     d.setDate(d.getDate() + weeks * 7)
     weekStart = getWeekStart(d)
     await loadGraduatingStudents()
@@ -129,7 +188,7 @@
     </div>
   </div>
 
-  <div id="graduating-grid" class="border rounded-lg"></div>
+  <div id="graduating-grid" class=""></div>
 </div>
 
 <style>

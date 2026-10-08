@@ -112,6 +112,16 @@
   const getId = (rel) => (!rel ? null : Array.isArray(rel) ? rel[0] : typeof rel === 'object' ? rel.id : rel)
   const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 
+  // Extended/changed records copy the original's `user`, so several student records can
+  // share ONE login account. Returns the set of user ids still used by any student record.
+  async function getUserIdsInUse() {
+    const records = await pb.collection('student').getFullList({
+      filter: 'user != ""',
+      fields: 'user',
+    })
+    return new Set(records.map((r) => getId(r.user)).filter(Boolean))
+  }
+
   // ── ADDED: active (non-graduated) name-collision helper, shared by the
   // single-add, bulk-add, and CSV-import duplicate checks below ─────────────
   const isActiveNameMatch = (s, name) => s.englishName?.toLowerCase() === name.toLowerCase() && s.status !== 'graduated'
@@ -494,18 +504,29 @@
       const student = await pb.collection('student').getOne(id)
       const userId = getId(student.user)
 
-      await pb.collection('student').delete(id) // cascade handles dailySchedule cleanup
+      await pb.collection('student').delete(id) // cascade handles dailySchedule cleanup for THIS record only
 
+      // Only remove the login account if no other student record still uses it
+      // (e.g. the original of an extended/changed student, or its extension).
+      // If the check itself fails, keep the account — that's the safe default.
+      let accountKept = false
       if (userId) {
-        try {
-          await pb.collection('users').delete(userId)
-        } catch (userErr) {
-          console.error('Failed to delete linked user:', userErr)
-          toast.warning('Student deleted, but linked user account could not be removed')
+        const inUse = await getUserIdsInUse().catch(() => null)
+        if (!inUse || inUse.has(userId)) {
+          accountKept = true
+        } else {
+          try {
+            await pb.collection('users').delete(userId)
+          } catch (userErr) {
+            console.error('Failed to delete linked user:', userErr)
+            toast.warning('Student deleted, but linked user account could not be removed')
+          }
         }
       }
 
-      toast.success('Student deleted')
+      toast.success(
+        accountKept ? 'Student deleted — login account kept (still used by another record)' : 'Student deleted'
+      )
       await loadStudents()
     } catch (err) {
       console.error(err)
@@ -598,13 +619,11 @@
     try {
       const ids = Array.from(selectedStudents)
 
-      // ── UPDATED: use already-loaded state instead of re-fetching with a
-      // giant "id=... || id=..." filter string, which breaks past ~50 ids ──
+      // Use already-loaded state instead of re-fetching with a giant filter string
       const records = students.filter((s) => ids.includes(s.id))
 
-      // ── UPDATED: batched deletes instead of N individual concurrent
-      // DELETE requests. Cascade delete on dailySchedule.student handles
-      // schedule cleanup automatically, so no manual lookup/delete needed. ──
+      // Batched deletes. Cascade delete on dailySchedule.student handles
+      // schedule cleanup automatically (for the deleted records only).
       const results = await batchFetchChunked(
         ids.map((id) => ({
           method: 'DELETE',
@@ -614,16 +633,36 @@
       const deleted = results.filter((r) => r.status >= 200 && r.status < 300).length
       const failed = results.length - deleted
 
-      const userResults = await Promise.allSettled(
-        records.filter((s) => s.user).map((s) => pb.collection('users').delete(s.user))
-      )
-      const userFailures = userResults.filter((r) => r.status === 'rejected')
-      if (userFailures.length) {
-        console.error('Some linked users failed to delete:', userFailures)
-        toast.warning(`${userFailures.length} linked user account(s) could not be removed`)
+      // Only delete login accounts that NO remaining student record uses.
+      // This is checked against the database AFTER the deletes, so it also protects:
+      //  - an extended/changed record deleted while its original stays
+      //  - an original deleted while its extension stays
+      //  - any record whose delete failed above
+      const userIds = [...new Set(records.map((s) => getId(s.user)).filter(Boolean))]
+      let keptCount = 0
+
+      if (userIds.length) {
+        const inUse = await getUserIdsInUse().catch(() => null)
+        const deletable = inUse ? userIds.filter((u) => !inUse.has(u)) : []
+        keptCount = userIds.length - deletable.length
+
+        const userResults = await Promise.allSettled(deletable.map((u) => pb.collection('users').delete(u)))
+        const userFailures = userResults.filter((r) => r.status === 'rejected')
+        if (userFailures.length) {
+          console.error('Some linked users failed to delete:', userFailures)
+          toast.warning(`${userFailures.length} linked user account(s) could not be removed`)
+        }
       }
 
-      toast.success([deleted && `${deleted} deleted`, failed && `${failed} failed`].filter(Boolean).join(', '))
+      toast.success(
+        [
+          deleted && `${deleted} deleted`,
+          failed && `${failed} failed`,
+          keptCount && `${keptCount} shared account(s) kept`,
+        ]
+          .filter(Boolean)
+          .join(', ')
+      )
       selectedStudents = new Set()
       await loadStudents()
     } catch (err) {

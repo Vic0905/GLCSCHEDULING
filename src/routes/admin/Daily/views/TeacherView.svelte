@@ -312,7 +312,7 @@
                   'div',
                   { class: 'flex items-center gap-1' },
                   [
-                    h('span', { class: 'font-bold text-neutral-700' }, cell.value),
+                    h('span', { class: 'font-bold text-red-500' }, cell.value),
                     hasNewBadge && h('span', { class: 'badge badge-success badge-xs ml-1' }, 'New'),
                   ].filter(Boolean)
                 ),
