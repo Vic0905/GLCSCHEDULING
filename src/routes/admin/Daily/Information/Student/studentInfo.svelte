@@ -77,10 +77,7 @@
 
   // ── Derived ───────────────────────────────────────────────────────────────
   let stats = $derived({
-    total: students.length,
-    new: students.filter((s) => s.status === 'new').length,
-    old: students.filter((s) => s.status === 'old').length,
-    graduated: students.filter((s) => s.status === 'graduated').length,
+    current: students.filter((s) => s.status === 'new' || s.status === 'old').length,
     extended: students.filter((s) => s.status === 'extended').length,
     changed: students.filter((s) => s.status === 'changed').length,
   })
@@ -908,13 +905,10 @@
   <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-6">
     <div>
       <h1 class="text-3xl font-extrabold tracking-tight text-base-content">Student Information</h1>
-      <div class="flex gap-4 mt-2 text-sm text-base-content/60">
-        <span>Total <strong class="text-base-content">{stats.total}</strong></span>
-        <span>New <strong class="text-success">{stats.new}</strong></span>
-        <span>Old <strong class="text-info">{stats.old}</strong></span>
-        <span>Graduated <strong class="text-warning">{stats.graduated}</strong></span>
-        <span>Extended <strong class="text-secondary">{stats.extended}</strong></span>
-        <span>Changed <strong class="text-error">{stats.changed}</strong></span>
+      <div class="flex gap-4 mt-2 text-sm font-semibold">
+        <span>Current: <strong class="text-base-content">{stats.current}</strong></span>
+        <span>Extended: <strong class="text-secondary">{stats.extended}</strong></span>
+        <span>Changed: <strong class="text-error">{stats.changed}</strong></span>
       </div>
     </div>
     <div class="flex gap-2">
