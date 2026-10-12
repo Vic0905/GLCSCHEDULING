@@ -34,6 +34,12 @@
   // SECTION 3: Pure helper functions
   // ─────────────────────────────────────────────
 
+  // G / H rooms = GRP, everything else = MTM
+  function getRoomCategory(roomName) {
+    const upper = (roomName || '').toUpperCase()
+    return upper.startsWith('G') || upper.startsWith('H') ? 'grp' : 'mtm'
+  }
+
   const BREAK_SCHEDULES = ['lunch break', 'break time', 'other task']
   const MAKEUP_SCHEDULE_NAME = 'make-up class'
 
@@ -101,7 +107,8 @@
   function formatTeacherCell(cell, row) {
     const bgClass = row.cells[0].data.bgClass
     const hasNewBadge = cell.status === 'new'
-    const subGivenCount = cell.subGivenCount || 0
+    const subMtmCount = cell.subMtmCount || 0
+    const subGrpCount = cell.subGrpCount || 0
     const makeupGivenCount = cell.makeupGivenCount || 0
 
     return h(
@@ -116,15 +123,14 @@
             hasNewBadge && h('span', { class: 'badge badge-success badge-xs ml-1' }, 'New'),
           ].filter(Boolean)
         ),
-        (subGivenCount > 0 || makeupGivenCount > 0) &&
+        (subMtmCount > 0 || subGrpCount > 0 || makeupGivenCount > 0) &&
           h(
             'div',
-            { class: 'flex gap-1 mt-1 flex-wrap justify-center' },
+            { class: 'flex gap-1 flex-wrap mt-1 justify-center' },
             [
-              subGivenCount > 0 &&
-                h('span', { class: 'badge badge-sm font-bold badge-info' }, `Subs: ${subGivenCount}`),
-              makeupGivenCount > 0 &&
-                h('span', { class: 'badge badge-sm font-bold badge-secondary' }, `Makeup: ${makeupGivenCount}`),
+              subMtmCount > 0 && h('span', { class: 'text-xs text-info' }, `MTM: ${subMtmCount}`),
+              subGrpCount > 0 && h('span', { class: 'text-xs text-info' }, `GRP: ${subGrpCount}`),
+              makeupGivenCount > 0 && h('span', { class: 'text-xs text-secondary' }, `Makeup: ${makeupGivenCount}`),
             ].filter(Boolean)
           ),
       ].filter(Boolean)
@@ -279,12 +285,15 @@
     const data = teachers.map((teacher, i) => {
       const bgClass = i % 2 === 0 ? 'bg-white text-neutral-800' : 'bg-neutral-100 text-neutral-800'
 
+      const subCounts = subCountMap.get(teacher.id) || { mtm: 0, grp: 0 } // NEW
+
       const row = [
         {
           value: teacher.name,
           status: teacher.status,
           bgClass,
-          subGivenCount: subCountMap.get(teacher.id) || 0,
+          subMtmCount: subCounts.mtm, // NEW (replaces subGivenCount)
+          subGrpCount: subCounts.grp, // NEW
           makeupGivenCount: makeupCountMap.get(teacher.id) || 0,
         },
         { value: teacherRoomMap.get(teacher.id) || '—', bgClass },
@@ -416,7 +425,9 @@
 
         if (s.sub) {
           if (!subSet.has(cellKey)) {
-            subCountMap.set(s.sub.id, (subCountMap.get(s.sub.id) || 0) + 1)
+            const counts = subCountMap.get(s.sub.id) || { mtm: 0, grp: 0 }
+            counts[getRoomCategory(s.roomName)]++
+            subCountMap.set(s.sub.id, counts)
           }
           subSet.add(cellKey)
         }

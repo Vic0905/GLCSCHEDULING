@@ -112,6 +112,11 @@
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getId = (rel) => (!rel ? null : Array.isArray(rel) ? rel[0] : typeof rel === 'object' ? rel.id : rel)
   const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
+  // `user` is a relation; expand gives an object (single) or array (multiple)
+  const getUsername = (s) => {
+    const u = s.expand?.user
+    return (Array.isArray(u) ? u[0]?.username : u?.username) || '-'
+  }
 
   // Extended/changed records copy the original's `user`, so several student records can
   // share ONE login account. Returns the set of user ids still used by any student record.
@@ -230,7 +235,7 @@
     try {
       const user = await pb.collection('users').create({
         username,
-        email: `${username}@student.local`,
+        email: `${username}.${crypto.randomUUID().slice(0, 8)}@student.local`,
         emailVisibility: true,
         password: '00000000',
         passwordConfirm: '00000000',
@@ -243,6 +248,67 @@
       toast.error(`User creation failed: ${err?.response?.message || err.message}`)
       if (err?.response?.data) console.error(JSON.stringify(err.response.data))
       return null
+    }
+  }
+
+  const ARCHIVE_PREFIX = 'GRAD_'
+
+  // Renames the login of graduated students so their English-name username is free
+  // for the next person. Skips users still needed by a non-graduated record
+  // (extended/changed records share the original's account).
+  async function archiveGraduatedAccounts(records) {
+    const activeUserIds = new Set(
+      records
+        .filter((s) => s.status !== 'graduated')
+        .map((s) => getId(s.user))
+        .filter(Boolean)
+    )
+
+    const toArchive = new Map() // userId -> studentId used to name the archived login
+    for (const s of records) {
+      const uid = getId(s.user)
+      if (s.status === 'graduated' && uid && !activeUserIds.has(uid) && !toArchive.has(uid)) {
+        toArchive.set(uid, s.studentId)
+      }
+    }
+    if (!toArchive.size) return 0
+
+    // one request to see which are already archived
+    const users = await pb.collection('users').getFullList({ fields: 'id,username' })
+    const current = new Map(users.map((u) => [u.id, u.username]))
+
+    const requests = [...toArchive]
+      .filter(([uid]) => current.has(uid) && !current.get(uid).startsWith(ARCHIVE_PREFIX))
+      .map(([uid, studentId]) => ({
+        method: 'PATCH',
+        url: `/api/collections/users/records/${uid}`,
+        body: {
+          username: `${ARCHIVE_PREFIX}${studentId}_${uid}`,
+        },
+      }))
+
+    if (requests.length) await batchFetchChunked(requests, 50)
+    return requests.length
+  }
+
+  async function restoreGraduatedAccount(student) {
+    const uid = getId(student.user)
+    const base = student.englishName
+      ?.trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+    if (!uid || !base) return
+
+    const owner = await pb
+      .collection('users')
+      .getFirstListItem(`username="${base}"`)
+      .catch(() => null)
+    if (owner && owner.id !== uid) {
+      toast.warning(`${student.englishName}: login "${base}" is now used by another student — left archived`)
+      return
+    }
+    if (!owner) {
+      await pb.collection('users').update(uid, { username: base })
     }
   }
 
@@ -280,6 +346,7 @@
         },
       }),
       s.studentId || '-',
+      getUsername(s),
       s.englishName || '-',
       s.name || '-',
       s.course || '-',
@@ -317,6 +384,7 @@
       columns: [
         { name: '-', width: '50px', sort: false },
         { name: 'Student ID', width: '80px' },
+        { name: 'Username', width: '100px', hidden: true },
         { name: 'English Name', width: '100px' },
         { name: 'Name', width: '120px' },
         { name: 'Course', width: '90px' },
@@ -344,7 +412,7 @@
   // ── Data ──────────────────────────────────────────────────────────────────
   async function loadStudents() {
     try {
-      let records = await pb.collection('student').getFullList({ sort: '-studentId' })
+      let records = await pb.collection('student').getFullList({ sort: '-studentId', expand: 'user' })
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -363,6 +431,15 @@
           ),
         ])
         records = await pb.collection('student').getFullList({ sort: '-studentId' })
+        // ADDED
+        if (toGraduate.length) {
+          await archiveGraduatedAccounts(records).catch((e) => console.error('Archive failed', e))
+        }
+        if (toUngraduate.length) {
+          await Promise.allSettled(toUngraduate.map(restoreGraduatedAccount))
+        }
+        // one refetch AFTER the renames, so statuses and usernames are both current
+        records = await pb.collection('student').getFullList({ sort: '-studentId', expand: 'user' })
       }
 
       students = records
@@ -468,7 +545,11 @@
           await pb.collection('student').update(formData.id, payload)
 
           const original = students.find((s) => s.id === formData.id)
-          if (original?.user && original.englishName?.toLowerCase() !== trimmed.toLowerCase()) {
+          if (
+            original?.user &&
+            original.status !== 'graduated' &&
+            original.englishName?.toLowerCase() !== trimmed.toLowerCase()
+          ) {
             const newBase = trimmed.toUpperCase().replace(/[^A-Z0-9]/g, '')
             if (newBase) {
               try {
@@ -901,6 +982,7 @@
       gridInstance = null
     }
   })
+
   onMount(loadStudents)
 </script>
 
