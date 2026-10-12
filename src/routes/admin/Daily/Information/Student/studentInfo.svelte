@@ -323,6 +323,41 @@
     }
   }
   const padId = (n) => String(n).padStart(5, '0')
+  // Frees up a Student ID. If ANOTHER record already holds numericId, the records that
+  // are in the way shift up by one (highest first, so nothing lands on a taken ID).
+  // When the edited record (selfId) moves DOWN to a lower ID, only the records between
+  // the new and old ID shift, and the edited record is parked on a free ID first so the
+  // chain can use its old slot. It all goes in ONE batch (PocketBase batches are
+  // transactional), so it either fully applies or not at all.
+  async function makeRoomForStudentId(numericId, selfId = null) {
+    const num = (s) => parseInt(s.studentId, 10)
+    const taken = students.some((s) => s.id !== selfId && num(s) === numericId)
+    if (!taken) return
+
+    const self = selfId ? students.find((s) => s.id === selfId) : null
+    const oldId = self ? num(self) : NaN
+    const movingDown = Number.isFinite(oldId) && oldId > numericId
+
+    const patch = (id, n) => ({
+      method: 'PATCH',
+      url: `/api/collections/student/records/${id}`,
+      body: { studentId: padId(n) },
+    })
+
+    const toShift = students
+      .filter((s) => s.id !== selfId && num(s) >= numericId && (!movingDown || num(s) < oldId))
+      .sort((a, b) => num(b) - num(a))
+
+    const requests = []
+    if (movingDown) {
+      const maxId = Math.max(0, ...students.map(num).filter(Number.isFinite))
+      requests.push(patch(self.id, maxId + 1)) // park on a guaranteed-free ID
+    }
+    toShift.forEach((s) => requests.push(patch(s.id, num(s) + 1)))
+    if (movingDown) requests.push(patch(self.id, numericId)) // land on the freed ID
+
+    await batchFetchChunked(requests)
+  }
 
   // ── Grid ──────────────────────────────────────────────────────────────────
   function renderGrid(records) {
@@ -492,45 +527,28 @@
         })
         toast.success('New record created with extended course and dates')
       } else {
-        // ── UPDATED: only block on a name collision with a still-ACTIVE
-        // student. A name matching only a graduated student is allowed
-        // through — createStudentUser() will give it its own fresh account. ──
+        // Only block on a name collision with a still-ACTIVE student. A name matching
+        // only a graduated student is allowed through — createStudentUser() gives it
+        // its own fresh account.
         if (!formData.id) {
           const dupe = students.find((s) => isActiveNameMatch(s, trimmed))
           if (dupe) return toast.error(`"${trimmed}" already exists`)
         }
 
-        // ── ADDED: manual Student ID entry for new students. If the chosen
-        // ID is already taken, cascade-shift that record and everyone at or
-        // above it up by one, instead of rejecting the entry. Existing
-        // students always keep their studentId when merely edited. ──────────
-        let manualStudentId = null
-        if (!formData.id) {
-          const numericId = parseInt(formData.studentId, 10)
-          if (!formData.studentId || !numericId || numericId < 1) {
-            return toast.error('Enter a valid Student ID')
-          }
-          manualStudentId = padId(numericId)
-
-          // Bump this ID and everyone at or above it, highest first so no
-          // record ever collides with one that hasn't moved yet.
-          const toShift = students
-            .filter((s) => parseInt(s.studentId, 10) >= numericId)
-            .sort((a, b) => parseInt(b.studentId, 10) - parseInt(a.studentId, 10))
-
-          if (toShift.length) {
-            await batchFetchChunked(
-              toShift.map((s) => ({
-                method: 'PATCH',
-                url: `/api/collections/student/records/${s.id}`,
-                body: { studentId: padId(parseInt(s.studentId, 10) + 1) },
-              }))
-            )
-          }
+        // Student ID is editable for new AND existing students.
+        // Blank is only tolerated when editing a legacy record that never had one.
+        const numericId = parseInt(formData.studentId, 10)
+        const idProvided = formData.studentId.trim() !== ''
+        if ((!formData.id || idProvided) && !(numericId >= 1)) {
+          return toast.error('Enter a valid Student ID')
         }
 
+        const existing = formData.id ? students.find((s) => s.id === formData.id) : null
+        const idChanged = idProvided && (!existing || parseInt(existing.studentId, 10) !== numericId)
+        if (idChanged) await makeRoomForStudentId(numericId, formData.id)
+
         const payload = {
-          ...(manualStudentId !== null && { studentId: manualStudentId }),
+          ...(idChanged && { studentId: padId(numericId) }),
           name: formData.name.trim(),
           englishName: trimmed,
           course: formData.course.trim(),
@@ -1005,12 +1023,12 @@
       <input id="csv-import-input" type="file" accept=".csv" class="hidden" onchange={handleCSVImport} />
       <button class="btn btn-outline shadow-sm" onclick={downloadTemplate}> Download Template </button>
       <button class="btn btn-outline shadow-sm" onclick={triggerCSVImport} disabled={isProcessing}> Import CSV </button>
-      <button class="btn btn-outline shadow-sm relative" onclick={openBulkModal}>
+      <!-- <button class="btn btn-outline shadow-sm relative" onclick={openBulkModal}>
         Add Multiple
         {#if hasDraft}<span
             class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-warning rounded-full border-2 border-base-100"
           ></span>{/if}
-      </button>
+      </button> -->
       <button class="btn btn-outline shadow-sm" onclick={openAdd}> Add Student </button>
     </div>
   </header>
@@ -1156,7 +1174,8 @@
             <div class="form-control">
               <label class="label py-1" for="student-id">
                 <span class="label-text font-semibold">
-                  Student ID {#if !formData.id}<span class="opacity-40 font-normal text-xs">(editable)</span>{/if}
+                  Student ID {#if editMode === 'normal'}<span class="opacity-40 font-normal text-xs">(editable)</span
+                    >{/if}
                 </span>
               </label>
               <input
@@ -1164,7 +1183,7 @@
                 bind:value={formData.studentId}
                 type="text"
                 inputmode="numeric"
-                disabled={!!formData.id}
+                disabled={!!formData.id && (formData.isChanged || formData.isExtended)}
                 class="input input-bordered w-full focus:input-primary disabled:opacity-50"
               />
             </div>
