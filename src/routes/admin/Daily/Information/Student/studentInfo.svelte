@@ -31,6 +31,7 @@
     isChanged: false,
     isExtended: false,
   }
+  const PAGE_SIZE = 10
 
   // ── State ─────────────────────────────────────────────────────────────────
   let students = $state([])
@@ -46,6 +47,9 @@
   let formData = $state({ ...BLANK_FORM })
   let bulkRawInput = $state('')
   let bulkDefaultStatus = $state('new')
+  let showDuplicatesModal = $state(false)
+  let duplicateRows = $state([])
+  let searchTerm = $state('')
 
   // ── State ─────────────────────────────────────────────────────────────────
   let viewedStudent = $state(null)
@@ -359,9 +363,49 @@
     await batchFetchChunked(requests)
   }
 
+  // Grid.js doesn't expose the current page, so read it from the active
+  // pagination button. Returns a 0-based page index.
+  function getCurrentPage() {
+    const btn = gridElement?.querySelector('.gridjs-pages .gridjs-currentPage')
+    const n = parseInt(btn?.textContent ?? '', 10)
+    return Number.isFinite(n) ? n - 1 : 0
+  }
+
+  const matchesSearch = (s, q) =>
+    [
+      s.studentId,
+      s.englishName,
+      s.name,
+      s.course,
+      s.level,
+      s.remarks,
+      s.start?.slice(0, 10),
+      s.end?.slice(0, 10),
+      s.status,
+    ].some((v) =>
+      String(v ?? '')
+        .toLowerCase()
+        .includes(q)
+    )
+
+  const visibleStudents = () => {
+    const q = searchTerm.trim().toLowerCase()
+    return q ? students.filter((s) => matchesSearch(s, q)) : students
+  }
+
+  function onSearch(e) {
+    searchTerm = e.target.value
+    renderGrid(visibleStudents(), 0) // a new search always starts on page 1
+  }
+
   // ── Grid ──────────────────────────────────────────────────────────────────
-  function renderGrid(records) {
+  function renderGrid(records, forcePage = null) {
     if (!gridElement) return
+
+    // Remember the page BEFORE the old grid is destroyed.
+    // Clamp it, so deleting the last row on the last page doesn't leave you on an empty page.
+    const lastPage = Math.max(0, Math.ceil(records.length / PAGE_SIZE) - 1)
+    const page = forcePage ?? (gridInstance ? Math.min(getCurrentPage(), lastPage) : 0)
 
     if (gridInstance) {
       gridInstance.destroy()
@@ -431,8 +475,8 @@
         { name: 'Actions', width: '150px', sort: false },
       ],
       data,
-      search: true,
-      pagination: { limit: 10 },
+      search: false,
+      pagination: { limit: PAGE_SIZE, page },
       className: {
         table: 'table w-full',
         th: 'text-center',
@@ -479,7 +523,7 @@
 
       students = records
       await tick()
-      renderGrid(students)
+      renderGrid(visibleStudents())
     } catch {
       toast.error('Failed to load students')
     }
@@ -703,11 +747,11 @@
   // ── Bulk selection ────────────────────────────────────────────────────────
   const selectAll = () => {
     selectedStudents = new Set(students.map((s) => s.id))
-    renderGrid(students)
+    renderGrid(visibleStudents())
   }
   const clearSelection = () => {
     selectedStudents = new Set()
-    renderGrid(students)
+    renderGrid(visibleStudents())
   }
 
   async function bulkDeleteStudents() {
@@ -821,15 +865,37 @@
 
         if (!rows.length) return toast.error('No valid rows found in CSV')
 
-        // ── UPDATED: only names held by ACTIVE students count as "existing" ──
-        const existingNames = new Set(
-          students.filter((s) => s.status !== 'graduated').map((s) => s.englishName?.toLowerCase())
-        )
-        const toCreate = rows.filter((r) => !existingNames.has(r.englishName.toLowerCase()))
-        const skipped = rows.length - toCreate.length
+        // Map each active English name -> its most recent record (list is sorted by -studentId,
+        // so the first one seen is the newest). Extended/changed records share the same name.
+        const activeByName = new Map()
+        for (const s of students) {
+          if (s.status === 'graduated') continue
+          const key = s.englishName?.toLowerCase()
+          if (key && !activeByName.has(key)) activeByName.set(key, s)
+        }
+
+        const toCreate = []
+        const duplicates = []
+        const seenInCsv = new Set()
+
+        for (const row of rows) {
+          const key = row.englishName.toLowerCase()
+          const match = activeByName.get(key)
+          if (match) {
+            duplicates.push({ row, reason: 'Already exists', match })
+          } else if (seenInCsv.has(key)) {
+            duplicates.push({ row, reason: 'Repeated in CSV', match: null })
+          } else {
+            seenInCsv.add(key)
+            toCreate.push(row)
+          }
+        }
+        const skipped = duplicates.length
 
         if (!toCreate.length) {
           toast.error(`All ${skipped} row(s) already exist`)
+          duplicateRows = duplicates
+          showDuplicatesModal = true
           e.target.value = ''
           return
         }
@@ -905,6 +971,10 @@
           showImportModal = false
           importStage = ''
           e.target.value = ''
+          if (duplicates.length) {
+            duplicateRows = duplicates
+            showDuplicatesModal = true
+          }
         }
       },
       error: () => toast.error('Failed to parse CSV'),
@@ -1052,6 +1122,19 @@
     </div>
   {/if}
 
+  <section class="card">
+    <div class="card-body p-0">
+      <input
+        type="search"
+        class="input input-sm m-5 w-64"
+        placeholder="Type a keyword..."
+        value={searchTerm}
+        oninput={onSearch}
+      />
+      <div bind:this={gridElement}></div>
+    </div>
+  </section>
+
   <!-- Grid -->
   <section class="card bg-base-100 border border-base-200">
     <div class="card-body p-0">
@@ -1137,6 +1220,68 @@
   {/if}
 </main>
 
+<!-- Skipped Duplicates Modal -->
+{#if showDuplicatesModal}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions a11y_interactive_supports_focus -->
+  <!-- svelte-ignore a11y_interactive_supports_focus -->
+  <div
+    class="modal modal-open bg-black/40"
+    role="dialog"
+    onclick={(e) => e.target === e.currentTarget && (showDuplicatesModal = false)}
+  >
+    <div class="modal-box max-w-4xl border border-base-300 p-6">
+      <div class="flex justify-between items-center mb-1">
+        <h3 class="font-bold text-xl">Skipped Duplicates</h3>
+        <button class="btn btn-sm btn-circle btn-ghost" onclick={() => (showDuplicatesModal = false)}>✕</button>
+      </div>
+      <!-- <p class="text-sm text-base-content/50 mb-4">
+        {duplicateRows.length} row{duplicateRows.length !== 1 ? 's were' : ' was'} not imported. If any of these are continuing
+        students, use <strong>Edit → Extend / Change</strong> on the existing record instead.
+      </p> -->
+
+      <div class="overflow-x-auto max-h-96 overflow-y-auto">
+        <table class="table table-sm w-full">
+          <thead class="sticky top-0 bg-base-100">
+            <tr>
+              <th>English Name</th>
+              <th>CSV Course</th>
+              <th>Reason</th>
+              <th>Existing ID</th>
+              <th>Existing Status</th>
+              <th>Existing Course</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each duplicateRows as d}
+              <tr>
+                <td class="font-medium">{d.row.englishName}</td>
+                <td class="text-base-content/70">{d.row.course || '—'}</td>
+                <td>
+                  <span class="badge badge-sm {d.match ? 'badge-warning' : 'badge-ghost'}">{d.reason}</span>
+                </td>
+                <td class="text-base-content/70">{d.match?.studentId || '—'}</td>
+                <td>
+                  {#if d.match}
+                    <span class="badge badge-sm {STATUS_BADGE[d.match.status] ?? 'badge-neutral'}"
+                      >{d.match.status}</span
+                    >
+                  {:else}
+                    —
+                  {/if}
+                </td>
+                <td class="text-base-content/70">{d.match?.course || '—'}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal-action mt-6">
+        <button class="btn btn-primary px-6" onclick={() => (showDuplicatesModal = false)}>Close</button>
+      </div>
+    </div>
+  </div>
+{/if}
 <!-- CSV Import Progress Modal -->
 {#if showImportModal}
   <div class="modal modal-open bg-black/40">
