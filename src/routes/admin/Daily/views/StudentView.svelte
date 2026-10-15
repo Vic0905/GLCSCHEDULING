@@ -415,6 +415,7 @@
           data,
           height: 'calc(100vh - 220px)',
           search: {
+            debounceTimeout: 300,
             selector: (cell) => {
               if (!cell || typeof cell !== 'object') return String(cell ?? '')
               if ('value' in cell) return cell.value ?? ''
