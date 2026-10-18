@@ -24,6 +24,9 @@
   let unsubTeacher = null
   let scheduleMap = new Map()
 
+  // --- Constants ---
+  const BREAK_SCHEDULES = ['lunch break', 'break time', 'other task']
+
   // --- Helper Functions ---
   function getTodayDate() {
     return new Date().toISOString().split('T')[0]
@@ -32,6 +35,16 @@
   function formatDateDisplay(dateStr) {
     const d = new Date(dateStr)
     return d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  }
+
+  // Returns the break customSchedule (if any) from a list of customSchedule items
+  function findBreakSchedule(customSchedules = []) {
+    return customSchedules.find((cs) => BREAK_SCHEDULES.includes(cs?.name?.toLowerCase().trim()))
+  }
+
+  // True if the first schedule entry of a cell is a break / other task
+  function isBreakEntries(entries) {
+    return !!findBreakSchedule(entries?.[0]?.customSchedule || [])
   }
 
   function getRoomSortKey(roomName) {
@@ -101,9 +114,8 @@
     const firstSched = schedules[0]
 
     // Break check
-    const BREAK_SCHEDULES = ['lunch break', 'break time', 'other task']
     const customSchedules = firstSched?.customSchedule || []
-    const breakSchedule = customSchedules.find((cs) => BREAK_SCHEDULES.includes(cs?.name?.toLowerCase().trim()))
+    const breakSchedule = findBreakSchedule(customSchedules)
 
     if (breakSchedule) {
       const style = breakSchedule.color
@@ -256,6 +268,20 @@
           return aKey.num - bKey.num
         })
 
+      // Available teacher count per timeslot:
+      // a teacher is available if they are not disabled and have no entry
+      // (no booking, no break / other task) in that timeslot.
+      const availableCountMap = new Map()
+      for (const ts of cachedTimeslots) {
+        let available = 0
+        for (const t of teachers) {
+          if (t.status === 'disabled') continue
+          const entries = scheduleMap.get(`${t.id}-${ts.id}`) || []
+          if (entries.length === 0) available++
+        }
+        availableCountMap.set(ts.id, available)
+      }
+
       // Build grid data: rows = teachers, columns = teacher name, room, then timeslots
       const data = teachers.map((teacher, i) => {
         const bgClass = i % 2 === 0 ? 'bg-white text-neutral-800' : 'bg-neutral-100 text-neutral-800'
@@ -290,12 +316,7 @@
             for (const ts of cachedTimeslots) {
               const entries = scheduleMap.get(`${cell.id}-${ts.id}`) || []
               if (!entries.length) continue
-
-              const BREAK_SCHEDULES = ['lunch break', 'break time', 'other task']
-              const isBreak = (entries[0]?.customSchedule || []).some((cs) =>
-                BREAK_SCHEDULES.includes(cs?.name?.toLowerCase().trim())
-              )
-              if (isBreak) continue
+              if (isBreakEntries(entries)) continue
 
               const roomName = (entries[0].roomName || '').toUpperCase()
               if (roomName.startsWith('A') || roomName.startsWith('ST') || roomName.startsWith('B')) mtmCount++
@@ -343,7 +364,14 @@
         ...cachedTimeslots.map((ts) => ({
           id: ts.id,
           width: '200px',
-          name: h('div', { class: 'flex flex-col items-center gap-0.5' }, [h('span', null, `${ts.start} - ${ts.end}`)]),
+          name: h('div', { class: 'flex flex-col items-center gap-0.5' }, [
+            h('span', null, `${ts.start} - ${ts.end}`),
+            h(
+              'span',
+              { class: 'text-xs font-semibold text-green-300' },
+              `Available: ${todayHoliday ? 0 : (availableCountMap.get(ts.id) ?? 0)}`
+            ),
+          ]),
           formatter: formatCell,
         })),
       ]

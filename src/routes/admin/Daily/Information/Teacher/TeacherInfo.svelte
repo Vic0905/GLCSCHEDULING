@@ -412,7 +412,7 @@
       <input id="csv-import-input" type="file" accept=".csv" class="hidden" onchange={handleCSVImport} />
       <button class="btn btn-outline shadow-sm" onclick={downloadTemplate}>Download Template</button>
       <button class="btn btn-outline shadow-sm" onclick={triggerCSVImport} disabled={isProcessing}>Import CSV</button>
-      <button class="btn btn-outline btn-primary shadow-sm" onclick={openAdd}>Add Teacher</button>
+      <button class="btn btn-outline shadow-sm" onclick={openAdd}>Add Teacher</button>
     </div>
   </header>
 
