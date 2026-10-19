@@ -75,7 +75,7 @@
         <li><a href="/#/daily/information/custom/customsched">Memo Info</a></li>
         <li><a href="/#/daily/information/print/printtable">Print Table</a></li>
         <!-- <li><a href="/#/student">Student Schedule</a></li> -->
-        <li><a href="/#/daily/views/checker">Checker</a></li>
+        <!-- <li><a href="/#/daily/views/checker">Checker</a></li> -->
       </ul>
     {/if}
   </li>

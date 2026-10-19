@@ -9,15 +9,21 @@
   let isRefreshing = $state(false)
   let teachers = $state([])
   let scheduleMap = $state(new Map())
+
+  /* PRESENT FEATURE (1/6): attendance state
   let rawAttendance = $state([])
-  let nowStr = $state(new Date().toTimeString().slice(0, 5)) // NEW: "HH:MM", refreshed periodically
+  let nowStr = $state(new Date().toTimeString().slice(0, 5)) // "HH:MM", refreshed periodically
+  */
 
   let unsubSchedule = null
   let unsubRoomType = null
   let unsubTeacher = null
-  let unsubAttendance = null
   let debounceTimer = null
-  let nowInterval = null // NEW
+
+  /* PRESENT FEATURE (1/6): subscription + interval handles
+  let unsubAttendance = null
+  let nowInterval = null
+  */
 
   let cachedTimeslots = $state([])
   let cachedTeachers = $state([])
@@ -37,6 +43,7 @@
     `${currentFriday.getFullYear()}-${String(currentFriday.getMonth() + 1).padStart(2, '0')}-${String(currentFriday.getDate()).padStart(2, '0')}`
   )
 
+  /* PRESENT FEATURE (2/6): derived values + period check
   // Resolves to the teacher record that belongs to the logged-in user
   let currentTeacherId = $derived(teachers.find((t) => t.user === pb.authStore.model?.id)?.id ?? null)
 
@@ -49,12 +56,13 @@
     return map
   })
 
-  // NEW: true only while "now" falls inside this timeslot's window, and only when
-  // viewing today — so check-in can't happen for past/future dates or periods
+  // True only while "now" falls inside this timeslot's window, and only when
+  // viewing today, so check-in can't happen for past/future dates or periods
   function isPeriodActive(ts) {
     if (!ts?.start || !ts?.end) return false
     return selectedDate === today() && nowStr >= ts.start && nowStr < ts.end
   }
+  */
 
   function formatDateShort(dateStr) {
     return new Date(dateStr)
@@ -79,7 +87,7 @@
     return BREAK_SCHEDULES.includes(cs?.name?.toLowerCase().trim())
   }
 
-  // Timeslots starting before 08:00 are prep slots — not counted in PERIOD numbering
+  // Timeslots starting before 08:00 are prep slots, not counted in PERIOD numbering
   function computePeriodNumbers(timeslots) {
     const map = new Map()
     let counter = 0
@@ -104,7 +112,7 @@
     return `background:${colorRemark}20; color:${colorRemark};`
   }
 
-  // Loads timeslots, roomTypes, teachers, holidays — rebuilds teachers[] and teacherRoomMap
+  // Loads timeslots, roomTypes, teachers, holidays; rebuilds teachers[] and teacherRoomMap
   async function loadStructure() {
     try {
       const [timeslots, roomTypes, allTeachers, holidays] = await Promise.all([
@@ -141,7 +149,7 @@
     }
   }
 
-  // Only fetches schedules and rebuilds scheduleMap — does NOT touch teachers[]
+  // Only fetches schedules and rebuilds scheduleMap; does NOT touch teachers[]
   async function loadScheduleData() {
     if (isRefreshing) return
     isRefreshing = true
@@ -181,7 +189,7 @@
 
         const rawCustomSchedule = s.expand?.customSchedule || []
 
-        // Original teacher keeps the record, but without the "Sub Class" badge —
+        // Original teacher keeps the record, but without the "Sub Class" badge:
         // they're absent, someone else is covering it.
         bookedTeacherIds.add(originalTeacherId)
         if (!newMap.has(originalTeacherId)) newMap.set(originalTeacherId, new Map())
@@ -222,7 +230,8 @@
         }
       }
 
-      await loadAttendance()
+      // PRESENT FEATURE (3/6): reload attendance after every schedule load
+      // await loadAttendance()
     } catch (err) {
       console.error(err)
       toast.error('Failed to load schedule data')
@@ -231,6 +240,7 @@
     }
   }
 
+  /* PRESENT FEATURE (4/6): attendance functions
   // Fetches just the attendance rows for the selected date
   async function loadAttendance() {
     try {
@@ -242,15 +252,15 @@
     }
   }
 
-  // CHANGED: one-way mark-present. No more deleting/toggling off, and only
-  // works while the period is actually active (see isPeriodActive above).
+  // One-way mark-present. No deleting/toggling off, and only works while the
+  // period is actually active (see isPeriodActive above).
   async function markPresent(teacherId, roomId, ts) {
     if (!roomId || !ts?.id) return
     if (teacherId !== currentTeacherId) return // safety: can't check in for someone else
     if (!isPeriodActive(ts)) return // safety: period isn't live right now
 
     const key = `${teacherId}-${roomId}-${ts.id}`
-    if (attendanceMap.get(key)) return // already marked — cannot change
+    if (attendanceMap.get(key)) return // already marked, cannot change
 
     try {
       await pb.collection('teacherAttendance').create({
@@ -266,6 +276,7 @@
       toast.error('Failed to mark present')
     }
   }
+  */
 
   // Full initial load
   async function initialLoad() {
@@ -324,21 +335,25 @@
       await loadStructure()
       await loadScheduleData()
     })
+
+    /* PRESENT FEATURE (5/6): live attendance subscription + clock tick
     unsubAttendance = await pb.collection('teacherAttendance').subscribe('*', loadAttendance)
 
-    // NEW: keep nowStr fresh so period-based button enabling updates live
+    // keep nowStr fresh so period-based button enabling updates live
     nowInterval = setInterval(() => {
       nowStr = new Date().toTimeString().slice(0, 5)
     }, 30000)
+    */
   })
 
   onDestroy(() => {
     clearTimeout(debounceTimer)
-    clearInterval(nowInterval) // NEW
+    // PRESENT FEATURE (6/6): cleanup
+    // clearInterval(nowInterval)
     unsubSchedule?.()
     unsubRoomType?.()
     unsubTeacher?.()
-    unsubAttendance?.()
+    // unsubAttendance?.()
   })
 </script>
 
@@ -363,7 +378,7 @@
     <div class="flex flex-col gap-8">
       {#each teachers as teacher (teacher.id)}
         {@const slots = scheduleMap.get(teacher.id)}
-        {@const isOwner = teacher.id === currentTeacherId}
+        <!-- PRESENT FEATURE (7): {@const isOwner = teacher.id === currentTeacherId} -->
 
         <div class="border-2 border-base-300 rounded-lg overflow-hidden bg-base-100 shadow-sm">
           <!-- HEADER: holiday left | title center | controls right -->
@@ -454,7 +469,7 @@
                 <col class="w-50" />
                 <col class="w-50" />
                 <col class="w-50" />
-                <col class="w-50" />
+                <!-- PRESENT FEATURE (8): <col class="w-50" /> -->
               </colgroup>
               <thead class="text-center border border-neutral-focus py-3">
                 <tr class="bg-neutral text-neutral-content text-xs tracking-widest h-10">
@@ -466,7 +481,7 @@
                   <th>LEVEL</th>
                   <th>MEMO</th>
                   <th>REMARKS</th>
-                  <th>PRESENT</th>
+                  <!-- PRESENT FEATURE (9): <th>PRESENT</th> -->
                 </tr>
               </thead>
               <tbody>
@@ -566,7 +581,7 @@
                         <span>—</span>
                       {/if}
                     </td>
-                    <!-- PRESENT column -->
+                    <!-- PRESENT FEATURE (10): PRESENT column + button
                     <td class="text-center text-sm border border-base-900">
                       {#if entries.length}
                         {@const uniqueRooms = [
@@ -608,6 +623,7 @@
                         <span class="opacity-30">—</span>
                       {/if}
                     </td>
+                    -->
                   </tr>
                 {/each}
               </tbody>
